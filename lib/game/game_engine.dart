@@ -1,0 +1,677 @@
+import 'dart:math';
+import 'package:flutter/material.dart';
+import '../models/ecs.dart';
+import '../models/character.dart';
+import '../models/element.dart';
+import '../models/pixel_art_data.dart';
+import '../models/game_entities.dart';
+
+class GameEngine extends ChangeNotifier {
+  late PlayerBall player;
+  RoleInfo role;
+  RaceInfo race;
+  MemeLevel level;
+  Size arenaSize = const Size(400, 600);
+
+  List<PixelBlock> blocks = [];
+  List<ArrowEntity> arrows = [];
+  List<HookEntity> hooks = [];
+  List<DropItem> drops = [];
+  List<PixelDebris> debris = [];
+  List<FloatingText> floatingTexts = [];
+  List<MistZone> mistZones = [];
+
+  // Hệ thống nguyên tố sở hữu
+  final Set<ElementType> ownedElements = {};
+  final Set<ElementType> activeFusions = {};
+
+  // Kinh tế & Tiến trình
+  int gold = 0;
+  double exp = 0;
+  double expToNextLevel = 100;
+  int characterLevel = 1;
+  int totalBlocksCount = 1;
+  int brokenBlocksCount = 0;
+  double completionPercent = 0.0;
+  bool isLevelCompleted = false;
+
+  // Cấp độ nâng cấp tại Lò rèn
+  int damageUpgradeLevel = 0;
+  int speedUpgradeLevel = 0;
+  int rangeUpgradeLevel = 0;
+  int bounceUpgradeLevel = 0;
+  int magnetUpgradeLevel = 0;
+
+  // Lực hút nam châm cơ bản
+  double get magnetRange => 80.0 + (magnetUpgradeLevel * 25.0);
+
+  // Sát thương tổng thể
+  double get totalDamage {
+    final base = (role.baseDamage + damageUpgradeLevel * 4.0) * race.damageMultiplier;
+    return base;
+  }
+
+  // Tốc độ đánh tổng thể
+  double get totalAttackSpeed {
+    return role.attackSpeed * race.speedMultiplier * (1.0 + speedUpgradeLevel * 0.15);
+  }
+
+  // Tầm với vũ khí
+  double get totalWeaponRange {
+    return (role.weaponRange + rangeUpgradeLevel * 8.0);
+  }
+
+  // Callbacks
+  VoidCallback? onLevelUp;
+  VoidCallback? onVictory;
+  VoidCallback? onBlockDestroyedEffect;
+
+  GameEngine({
+    required this.role,
+    required this.race,
+    required this.level,
+  }) {
+    _initEngine();
+  }
+
+  void _initEngine() {
+    // Tốc độ nảy cơ bản
+    double speed = 220.0 * (1.0 + race.bounceBonus + bounceUpgradeLevel * 0.1);
+    final randomAngle = (Random().nextDouble() * 0.6 + 0.2) * pi; // Hướng xuống chếch
+    final vx = speed * cos(randomAngle);
+    final vy = speed * sin(randomAngle);
+
+    player = PlayerBall(
+      id: 'player',
+      transform: TransformComponent(
+        x: arenaSize.width / 2,
+        y: arenaSize.height - 80,
+        vx: vx,
+        vy: vy,
+        width: 32,
+        height: 32,
+      ),
+      role: role,
+      race: race,
+    );
+
+    _buildPixelGrid();
+  }
+
+  void resize(Size newSize) {
+    if (arenaSize == newSize) return;
+    arenaSize = newSize;
+    _buildPixelGrid();
+    player.transform.x = arenaSize.width / 2;
+    player.transform.y = arenaSize.height - 90;
+    notifyListeners();
+  }
+
+  void _buildPixelGrid() {
+    blocks.clear();
+    final cols = level.cols;
+    final rows = level.rows;
+
+    // Tính toán kích thước khối pixel to (Chunky Pixels)
+    const padding = 16.0;
+    final availableWidth = arenaSize.width - padding * 2;
+    final blockSize = (availableWidth / cols).clamp(20.0, 34.0);
+
+    final gridWidth = cols * blockSize;
+    final startX = (arenaSize.width - gridWidth) / 2;
+    const startY = 65.0; // Khoảng cách từ đỉnh màn hình
+
+    totalBlocksCount = cols * rows;
+    brokenBlocksCount = 0;
+    completionPercent = 0.0;
+
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        final memeColor = level.colorGrid[r][c];
+        final bx = startX + c * blockSize + blockSize / 2;
+        final by = startY + r * blockSize + blockSize / 2;
+
+        final block = PixelBlock(
+          id: 'block_${r}_$c',
+          transform: TransformComponent(
+            x: bx,
+            y: by,
+            width: blockSize,
+            height: blockSize,
+          ),
+          health: HealthComponent(maxHp: 25.0 + (level.id - 1) * 15.0),
+          elementAffinity: ElementAffinityComponent(),
+          render: RenderComponent(primaryColor: const Color(0xFF4A5568)),
+          col: c,
+          row: r,
+          memeColor: memeColor,
+        );
+        blocks.add(block);
+      }
+    }
+  }
+
+  void update(double dt) {
+    if (isLevelCompleted) return;
+
+    // 1. Cập nhật Nhân vật (Vị trí & Góc vũ khí)
+    player.update(dt);
+    _handleBallBorderCollision();
+    _handleBallBlockCollision();
+
+    // 2. Cơ chế Vũ khí theo Role
+    _handleWeaponAttacks(dt);
+
+    // 3. Cập nhật Mũi tên & Móc câu
+    _updateProjectiles(dt);
+
+    // 4. Cập nhật Hiệu ứng Nguyên tố & Sương mù (Mist)
+    _updateMistZones(dt);
+
+    // 5. Cập nhật các khối Pixel
+    for (final b in blocks) {
+      if (!b.health!.isDestroyed) {
+        b.update(dt);
+      }
+    }
+
+    // 6. Cập nhật Vật phẩm rơi & Lực hút Nam châm
+    _updateDrops(dt);
+
+    // 7. Cập nhật Hạt vỡ & Chữ bay
+    debris.removeWhere((p) => p.update(dt));
+    floatingTexts.removeWhere((t) => t.update(dt));
+
+    notifyListeners();
+  }
+
+  void _handleBallBorderCollision() {
+    final t = player.transform;
+    final r = player.radius;
+
+    if (t.x - r <= 0) {
+      t.x = r;
+      t.vx = t.vx.abs();
+    } else if (t.x + r >= arenaSize.width) {
+      t.x = arenaSize.width - r;
+      t.vx = -t.vx.abs();
+    }
+
+    if (t.y - r <= 45) { // Đỉnh trên (dưới thanh HUD)
+      t.y = 45 + r;
+      t.vy = t.vy.abs();
+    } else if (t.y + r >= arenaSize.height - 10) {
+      t.y = arenaSize.height - 10 - r;
+      t.vy = -t.vy.abs();
+    }
+  }
+
+  void _handleBallBlockCollision() {
+    final pt = player.transform;
+    final r = player.radius;
+
+    for (final block in blocks) {
+      if (block.health!.isDestroyed) continue;
+
+      final rect = block.transform.rect;
+      // Tìm điểm gần nhất trên hình chữ nhật tới tâm quả bóng
+      final nearestX = pt.x.clamp(rect.left, rect.right);
+      final nearestY = pt.y.clamp(rect.top, rect.bottom);
+
+      final dx = pt.x - nearestX;
+      final dy = pt.y - nearestY;
+      final distSq = dx * dx + dy * dy;
+
+      if (distSq < r * r) {
+        // Có va chạm! Phản xạ vận tốc
+        if (dx.abs() > dy.abs()) {
+          pt.vx = dx > 0 ? pt.vx.abs() : -pt.vx.abs();
+        } else {
+          pt.vy = dy > 0 ? pt.vy.abs() : -pt.vy.abs();
+        }
+
+        // Đẩy quả bóng ra khỏi vật cản để tránh kẹt
+        final dist = sqrt(distSq);
+        final overlap = r - (dist > 0 ? dist : 0.001);
+        if (dist > 0) {
+          pt.x += (dx / dist) * overlap;
+          pt.y += (dy / dist) * overlap;
+        }
+
+        // Gây sát thương va chạm (Orc gây nhiều dame hơn)
+        double collisionDmg = totalDamage * 0.75;
+        // Nếu là Tộc Yeti: Frost Aura làm đông cứng khối
+        if (race.type == RaceType.yeti) {
+          block.elementAffinity?.applyFrost(3.0);
+          collisionDmg *= 1.35;
+        }
+        _damageBlock(block, collisionDmg, 'VA CHẠM');
+        break; // Mỗi frame chỉ xử lý 1 va chạm chính
+      }
+    }
+  }
+
+  void _handleWeaponAttacks(double dt) {
+    final center = player.transform.position;
+    final wAngle = player.weaponAngle;
+    final wRange = totalWeaponRange;
+
+    switch (role.type) {
+      case RoleType.warrior:
+        // Đại kiếm xoay quanh khối cầu
+        final swordTip = Offset(
+          center.dx + cos(wAngle) * wRange,
+          center.dy + sin(wAngle) * wRange,
+        );
+        _checkMeleeLineCollision(center, swordTip, totalDamage, dt, 'CHÉM');
+        break;
+
+      case RoleType.farmer:
+        // Liềm gặt quét cung rộng
+        final scytheTip = Offset(
+          center.dx + cos(wAngle) * wRange,
+          center.dy + sin(wAngle) * wRange,
+        );
+        _checkMeleeLineCollision(center, scytheTip, totalDamage * 0.9, dt, 'GẶT');
+        break;
+
+      case RoleType.lumberjack:
+        // Rìu bổ nặng theo chu kỳ
+        final axeTip = Offset(
+          center.dx + cos(wAngle) * wRange,
+          center.dy + sin(wAngle) * wRange,
+        );
+        _checkMeleeLineCollision(center, axeTip, totalDamage * 1.6, dt, 'BỔ RÌU');
+        break;
+
+      case RoleType.archer:
+        // Cung thủ tự bắn mũi tên theo nhịp
+        if (player.attackCooldown <= 0) {
+          player.attackCooldown = 1.0 / totalAttackSpeed;
+          final arrowVx = cos(wAngle) * 380.0;
+          final arrowVy = sin(wAngle) * 380.0;
+          arrows.add(ArrowEntity(
+            id: 'arrow_${DateTime.now().millisecondsSinceEpoch}',
+            transform: TransformComponent(
+              x: center.dx,
+              y: center.dy,
+              vx: arrowVx,
+              vy: arrowVy,
+              width: 14,
+              height: 14,
+            ),
+            damage: totalDamage * 0.85,
+          ));
+        }
+        break;
+
+      case RoleType.fisherman:
+        // Người đánh cá phóng cần câu giật kéo
+        if (player.attackCooldown <= 0) {
+          player.attackCooldown = 1.2 / totalAttackSpeed;
+          final hookVx = cos(wAngle) * 320.0;
+          final hookVy = sin(wAngle) * 320.0;
+          hooks.add(HookEntity(
+            id: 'hook_${DateTime.now().millisecondsSinceEpoch}',
+            transform: TransformComponent(
+              x: center.dx,
+              y: center.dy,
+              vx: hookVx,
+              vy: hookVy,
+              width: 12,
+              height: 12,
+            ),
+            damage: totalDamage * 1.1,
+            origin: center,
+          ));
+        }
+        break;
+    }
+  }
+
+  void _checkMeleeLineCollision(
+      Offset start, Offset end, double dmg, double dt, String hitLabel) {
+    for (final block in blocks) {
+      if (block.health!.isDestroyed) continue;
+      final rect = block.transform.rect;
+      if (_lineIntersectsRect(start, end, rect)) {
+        _damageBlock(block, dmg * dt * 4.0, hitLabel);
+      }
+    }
+  }
+
+  bool _lineIntersectsRect(Offset p1, Offset p2, Rect rect) {
+    if (rect.contains(p1) || rect.contains(p2)) return true;
+    // Kiểm tra tâm rect cách đường thẳng bao xa
+    final center = rect.center;
+    final d = _distToSegment(center, p1, p2);
+    return d <= rect.width / 2;
+  }
+
+  double _distToSegment(Offset p, Offset v, Offset w) {
+    final l2 = (v.dx - w.dx) * (v.dx - w.dx) + (v.dy - w.dy) * (v.dy - w.dy);
+    if (l2 == 0) return (p - v).distance;
+    final t = (((p.dx - v.dx) * (w.dx - v.dx) + (p.dy - v.dy) * (w.dy - v.dy)) / l2)
+        .clamp(0.0, 1.0);
+    final projection = Offset(v.dx + t * (w.dx - v.dx), v.dy + t * (w.dy - v.dy));
+    return (p - projection).distance;
+  }
+
+  void _updateProjectiles(double dt) {
+    // Cập nhật tên bắn
+    for (int i = arrows.length - 1; i >= 0; i--) {
+      final arrow = arrows[i];
+      arrow.update(dt);
+      if (arrow.lifeTime <= 0) {
+        arrows.removeAt(i);
+        continue;
+      }
+      // Va chạm với khối
+      for (final block in blocks) {
+        if (block.health!.isDestroyed) continue;
+        if (block.transform.rect.contains(arrow.transform.position)) {
+          _damageBlock(block, arrow.damage, 'BẮN TỈA');
+          arrow.pierceCount--;
+          if (arrow.pierceCount <= 0) {
+            arrows.removeAt(i);
+            break;
+          }
+        }
+      }
+    }
+
+    // Cập nhật Móc câu
+    for (int i = hooks.length - 1; i >= 0; i--) {
+      final hook = hooks[i];
+      hook.update(dt);
+      if (hook.isReturning &&
+          (hook.transform.position - hook.origin).distance < 15) {
+        hooks.removeAt(i);
+        continue;
+      }
+      for (final block in blocks) {
+        if (block.health!.isDestroyed) continue;
+        if (block.transform.rect.contains(hook.transform.position)) {
+          _damageBlock(block, hook.damage, 'MÓC GIẬT');
+          hook.isReturning = true;
+          break;
+        }
+      }
+    }
+  }
+
+  void _updateMistZones(double dt) {
+    for (int i = mistZones.length - 1; i >= 0; i--) {
+      final mist = mistZones[i];
+      if (mist.update(dt)) {
+        mistZones.removeAt(i);
+        continue;
+      }
+      // Gây DoT lên các khối trong bán kính sương mù
+      for (final block in blocks) {
+        if (block.health!.isDestroyed) continue;
+        if ((block.transform.position - mist.center).distance <= mist.radius) {
+          _damageBlock(block, mist.damagePerSec * dt, 'SƯƠNG MÙ');
+        }
+      }
+    }
+  }
+
+  void _damageBlock(PixelBlock block, double dmg, String source) {
+    if (block.health!.isDestroyed) return;
+
+    // Áp dụng hiệu ứng Tộc Người Cá (Làm ướt)
+    if (race.type == RaceType.merfolk) {
+      block.elementAffinity?.applyWater(4.0);
+    }
+
+    // Nếu khối đang bị đóng băng (Frozen): Nhận thêm 50% sát thương
+    if (block.elementAffinity?.isFrozen ?? false) {
+      dmg *= 1.5;
+    }
+
+    // Kích hoạt Sương Mù nếu có Dung Hợp Mist
+    if (activeFusions.contains(ElementType.mist) && Random().nextDouble() < 0.08) {
+      mistZones.add(MistZone(center: block.transform.position));
+    }
+
+    // Kích hoạt Tia sét giật chuỗi nếu có Chain Lightning
+    if (activeFusions.contains(ElementType.chainLightning) &&
+        (block.elementAffinity?.isSoaked ?? false)) {
+      _triggerChainLightning(block);
+    }
+
+    final justDestroyed = block.health!.takeDamage(dmg);
+
+    if (justDestroyed) {
+      _onBlockDestroyed(block);
+    }
+  }
+
+  void _triggerChainLightning(PixelBlock origin) {
+    int chainCount = 0;
+    for (final b in blocks) {
+      if (b == origin || b.health!.isDestroyed) continue;
+      if ((b.transform.position - origin.transform.position).distance < 75) {
+        b.health!.takeDamage(totalDamage * 0.9);
+        floatingTexts.add(FloatingText(
+          text: '⚡ SÉT!',
+          x: b.transform.x,
+          y: b.transform.y,
+          color: Colors.yellowAccent,
+        ));
+        chainCount++;
+        if (chainCount >= 5) break;
+      }
+    }
+  }
+
+  void _onBlockDestroyed(PixelBlock block) {
+    brokenBlocksCount++;
+    completionPercent = (brokenBlocksCount / totalBlocksCount).clamp(0.0, 1.0);
+
+    // Kích hoạt Callback âm thanh vỡ giòn tan & rung màn hình
+    onBlockDestroyedEffect?.call();
+
+    // 1. Tạo các hạt vỡ nổ tung (Debris)
+    final rng = Random();
+    for (int i = 0; i < 6; i++) {
+      final pAngle = rng.nextDouble() * 2 * pi;
+      final pSpeed = rng.nextDouble() * 120 + 40;
+      debris.add(PixelDebris(
+        x: block.transform.x,
+        y: block.transform.y,
+        vx: cos(pAngle) * pSpeed,
+        vy: sin(pAngle) * pSpeed,
+        size: rng.nextDouble() * 4 + 3,
+        color: block.memeColor,
+      ));
+    }
+
+    // 2. Rơi Vàng & Ngọc EXP (Nông dân được +25% Bội thu, Người lùn +30% Vàng)
+    double goldVal = 10.0 * (1.0 + race.goldBonus);
+    double expVal = 15.0 * (1.0 + race.expBonus);
+    if (role.type == RoleType.farmer) {
+      goldVal *= 1.25;
+      expVal *= 1.25;
+    }
+
+    drops.add(DropItem(
+      id: 'gold_${DateTime.now().microsecondsSinceEpoch}',
+      transform: TransformComponent(
+        x: block.transform.x,
+        y: block.transform.y,
+        vx: (rng.nextDouble() - 0.5) * 80,
+        vy: (rng.nextDouble() - 0.5) * 80,
+      ),
+      type: DropType.gold,
+      value: goldVal,
+    ));
+
+    drops.add(DropItem(
+      id: 'exp_${DateTime.now().microsecondsSinceEpoch}',
+      transform: TransformComponent(
+        x: block.transform.x,
+        y: block.transform.y,
+        vx: (rng.nextDouble() - 0.5) * 80,
+        vy: (rng.nextDouble() - 0.5) * 80,
+      ),
+      type: DropType.exp,
+      value: expVal,
+    ));
+
+    // Hiển thị text bay sảng khoái
+    floatingTexts.add(FloatingText(
+      text: '+${goldVal.toInt()}G',
+      x: block.transform.x,
+      y: block.transform.y - 10,
+      color: Colors.amber,
+    ));
+
+    // Kiểm tra chiến thắng màn chơi khi phá sạch hoặc đạt 100%
+    if (brokenBlocksCount >= totalBlocksCount) {
+      isLevelCompleted = true;
+      onVictory?.call();
+    }
+  }
+
+  void _updateDrops(double dt) {
+    final pCenter = player.transform.position;
+    final mRange = magnetRange;
+
+    for (int i = drops.length - 1; i >= 0; i--) {
+      final drop = drops[i];
+      final dPos = drop.transform.position;
+      final dist = (pCenter - dPos).distance;
+
+      // Hút về phía người chơi nếu nằm trong vùng nam châm
+      if (dist <= mRange) {
+        final dirX = (pCenter.dx - dPos.dx) / (dist > 0 ? dist : 1);
+        final dirY = (pCenter.dy - dPos.dy) / (dist > 0 ? dist : 1);
+        final pullSpeed = 420.0;
+        drop.transform.vx = dirX * pullSpeed;
+        drop.transform.vy = dirY * pullSpeed;
+      }
+
+      drop.update(dt);
+
+      // Thu thập thành công
+      if (dist <= player.radius + 6) {
+        if (drop.type == DropType.gold) {
+          gold += drop.value.toInt();
+        } else {
+          addExp(drop.value);
+        }
+        drops.removeAt(i);
+      } else if (drop.lifeTime <= 0) {
+        drops.removeAt(i);
+      }
+    }
+  }
+
+  void addExp(double amount) {
+    exp += amount;
+    if (exp >= expToNextLevel) {
+      exp -= expToNextLevel;
+      characterLevel++;
+      expToNextLevel = (expToNextLevel * 1.35).roundToDouble();
+      onLevelUp?.call();
+    }
+  }
+
+  // Đẩy bóng (Boost / Dash) khi người chơi chạm kéo
+  void boostBall(Offset flingVelocity) {
+    player.transform.vx += flingVelocity.dx * 0.4;
+    player.transform.vy += flingVelocity.dy * 0.4;
+    // Giới hạn vận tốc tối đa
+    final curSpeed = sqrt(player.transform.vx * player.transform.vx +
+        player.transform.vy * player.transform.vy);
+    final maxSpeed = 480.0;
+    if (curSpeed > maxSpeed) {
+      player.transform.vx = (player.transform.vx / curSpeed) * maxSpeed;
+      player.transform.vy = (player.transform.vy / curSpeed) * maxSpeed;
+    }
+  }
+
+  // Thêm nguyên tố mới khi lên cấp
+  void addElement(ElementType element) {
+    ownedElements.add(element);
+    notifyListeners();
+  }
+
+  // Thực hiện Dung hợp nguyên tố
+  bool fuseElements(ElementType a, ElementType b) {
+    final fusion = ElementData.findFusion(a, b);
+    if (fusion != null) {
+      activeFusions.add(fusion.type);
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  // Nâng cấp tại Lò rèn
+  int getUpgradeCost(int currentLevel) {
+    int baseCost = 40 + currentLevel * 30;
+    // Giảm giá người lùn (-25%)
+    if (race.type == RaceType.dwarf) {
+      baseCost = (baseCost * 0.75).round();
+    }
+    return baseCost;
+  }
+
+  bool upgradeDamage() {
+    final cost = getUpgradeCost(damageUpgradeLevel);
+    if (gold >= cost) {
+      gold -= cost;
+      damageUpgradeLevel++;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  bool upgradeSpeed() {
+    final cost = getUpgradeCost(speedUpgradeLevel);
+    if (gold >= cost) {
+      gold -= cost;
+      speedUpgradeLevel++;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  bool upgradeRange() {
+    final cost = getUpgradeCost(rangeUpgradeLevel);
+    if (gold >= cost) {
+      gold -= cost;
+      rangeUpgradeLevel++;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  bool upgradeBounce() {
+    final cost = getUpgradeCost(bounceUpgradeLevel);
+    if (gold >= cost) {
+      gold -= cost;
+      bounceUpgradeLevel++;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  bool upgradeMagnet() {
+    final cost = getUpgradeCost(magnetUpgradeLevel);
+    if (gold >= cost) {
+      gold -= cost;
+      magnetUpgradeLevel++;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+}
