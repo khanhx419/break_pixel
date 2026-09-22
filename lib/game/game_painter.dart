@@ -95,10 +95,21 @@ class GamePainter extends CustomPainter {
     final gridHeight = engine.level.rows * engine.gridBlockSize;
     final worldRect = Rect.fromLTWH(engine.gridStartX, engine.gridStartY, gridWidth, gridHeight);
 
-    paint.color = Colors.cyanAccent.withOpacity(0.25);
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 2.0;
+    // Nền tối phía sau bức tranh
+    paint.color = const Color(0xFF0C1322);
+    paint.style = PaintingStyle.fill;
     canvas.drawRect(worldRect, paint);
+
+    // Tường biên giới bức tranh (Outer Barrier): Phát sáng neon chặn bóng nảy bên trong
+    paint.color = Colors.cyanAccent.withOpacity(0.85);
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = 3.0;
+    canvas.drawRect(worldRect, paint);
+
+    // Hào quang viền tường ngoài
+    paint.color = Colors.cyanAccent.withOpacity(0.25);
+    paint.strokeWidth = 6.0;
+    canvas.drawRect(worldRect.inflate(2.0), paint);
 
     // Vẽ nền sàn và viền neon cho buồng rỗng 2x2 ở tâm
     final centerX = engine.gridStartX + gridWidth / 2;

@@ -283,19 +283,37 @@ class GameEngine extends ChangeNotifier {
     final t = player.transform;
     final r = player.radius;
 
-    if (t.x - r <= 0) {
-      t.x = r;
+    // Giữ quả cầu chỉ nảy bên trong giới hạn của bức ảnh Pixel (không bay ra ngoài)
+    final double minX;
+    final double maxX;
+    final double minY;
+    final double maxY;
+
+    if (isGridBuilt) {
+      minX = gridStartX + r;
+      maxX = gridStartX + level.cols * gridBlockSize - r;
+      minY = gridStartY + r;
+      maxY = gridStartY + level.rows * gridBlockSize - r;
+    } else {
+      minX = r;
+      maxX = arenaSize.width - r;
+      minY = 45 + r;
+      maxY = arenaSize.height - 10 - r;
+    }
+
+    if (t.x <= minX) {
+      t.x = minX;
       t.vx = t.vx.abs();
-    } else if (t.x + r >= arenaSize.width) {
-      t.x = arenaSize.width - r;
+    } else if (t.x >= maxX) {
+      t.x = maxX;
       t.vx = -t.vx.abs();
     }
 
-    if (t.y - r <= 45) { // Đỉnh trên (dưới thanh HUD)
-      t.y = 45 + r;
+    if (t.y <= minY) {
+      t.y = minY;
       t.vy = t.vy.abs();
-    } else if (t.y + r >= arenaSize.height - 10) {
-      t.y = arenaSize.height - 10 - r;
+    } else if (t.y >= maxY) {
+      t.y = maxY;
       t.vy = -t.vy.abs();
     }
   }
@@ -464,11 +482,19 @@ class GameEngine extends ChangeNotifier {
   }
 
   void _updateProjectiles(double dt) {
+    final double minX = isGridBuilt ? gridStartX : 0;
+    final double maxX = isGridBuilt ? gridStartX + level.cols * gridBlockSize : arenaSize.width;
+    final double minY = isGridBuilt ? gridStartY : 45;
+    final double maxY = isGridBuilt ? gridStartY + level.rows * gridBlockSize : arenaSize.height;
+
     // Cập nhật tên bắn
     for (int i = arrows.length - 1; i >= 0; i--) {
       final arrow = arrows[i];
       arrow.update(dt);
-      if (arrow.lifeTime <= 0) {
+      final aPos = arrow.transform.position;
+      if (arrow.lifeTime <= 0 ||
+          aPos.dx < minX || aPos.dx > maxX ||
+          aPos.dy < minY || aPos.dy > maxY) {
         arrows.removeAt(i);
         continue;
       }
@@ -490,6 +516,10 @@ class GameEngine extends ChangeNotifier {
     for (int i = hooks.length - 1; i >= 0; i--) {
       final hook = hooks[i];
       hook.update(dt);
+      final hPos = hook.transform.position;
+      if (hPos.dx < minX || hPos.dx > maxX || hPos.dy < minY || hPos.dy > maxY) {
+        hook.isReturning = true;
+      }
       if (hook.isReturning &&
           (hook.transform.position - hook.origin).distance < 15) {
         hooks.removeAt(i);
@@ -675,6 +705,14 @@ class GameEngine extends ChangeNotifier {
       }
 
       drop.update(dt);
+
+      // Giữ vật phẩm bên trong khung bức ảnh
+      if (isGridBuilt) {
+        final gridWidth = level.cols * gridBlockSize;
+        final gridHeight = level.rows * gridBlockSize;
+        drop.transform.x = drop.transform.x.clamp(gridStartX + 4, gridStartX + gridWidth - 4);
+        drop.transform.y = drop.transform.y.clamp(gridStartY + 4, gridStartY + gridHeight - 4);
+      }
 
       // Thu thập thành công
       if (dist <= player.radius + 6) {
