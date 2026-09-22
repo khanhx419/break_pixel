@@ -74,10 +74,14 @@ class GameEngine extends ChangeNotifier {
     _initEngine();
   }
 
+  double gridStartX = 0;
+  double gridStartY = 0;
+  double gridBlockSize = 28;
+
   void _initEngine() {
     // Tốc độ nảy cơ bản
     double speed = 220.0 * (1.0 + race.bounceBonus + bounceUpgradeLevel * 0.1);
-    final randomAngle = (Random().nextDouble() * 0.6 + 0.2) * pi; // Hướng xuống chếch
+    final randomAngle = Random().nextDouble() * 2 * pi; // Bất kỳ góc nào 360 độ
     final vx = speed * cos(randomAngle);
     final vy = speed * sin(randomAngle);
 
@@ -85,7 +89,7 @@ class GameEngine extends ChangeNotifier {
       id: 'player',
       transform: TransformComponent(
         x: arenaSize.width / 2,
-        y: arenaSize.height - 80,
+        y: arenaSize.height / 2,
         vx: vx,
         vy: vy,
         width: 32,
@@ -100,10 +104,35 @@ class GameEngine extends ChangeNotifier {
 
   void resize(Size newSize) {
     if (arenaSize == newSize) return;
+    final isFirstSetup = blocks.isEmpty;
     arenaSize = newSize;
-    _buildPixelGrid();
-    player.transform.x = arenaSize.width / 2;
-    player.transform.y = arenaSize.height - 90;
+
+    if (isFirstSetup) {
+      _buildPixelGrid();
+    } else {
+      // Điều chỉnh lại vị trí grid khi thay đổi kích thước mà không reset màn chơi
+      final cols = level.cols;
+      final rows = level.rows;
+      const padding = 16.0;
+      final availableWidth = arenaSize.width - padding * 2;
+      const topOffset = 50.0;
+      final availableHeight = (arenaSize.height - topOffset - 65.0).clamp(100.0, 2000.0);
+      final blockSizeByWidth = availableWidth / cols;
+      final blockSizeByHeight = availableHeight / rows;
+      final blockSize = min(blockSizeByWidth, blockSizeByHeight).clamp(18.0, 36.0);
+      gridBlockSize = blockSize;
+      final gridWidth = cols * blockSize;
+      final gridHeight = rows * blockSize;
+      gridStartX = (arenaSize.width - gridWidth) / 2;
+      gridStartY = topOffset + (availableHeight - gridHeight) / 2;
+
+      for (final block in blocks) {
+        block.transform.x = gridStartX + block.col * blockSize + blockSize / 2;
+        block.transform.y = gridStartY + block.row * blockSize + blockSize / 2;
+        block.transform.width = blockSize;
+        block.transform.height = blockSize;
+      }
+    }
     notifyListeners();
   }
 
@@ -112,24 +141,40 @@ class GameEngine extends ChangeNotifier {
     final cols = level.cols;
     final rows = level.rows;
 
-    // Tính toán kích thước khối pixel to (Chunky Pixels)
     const padding = 16.0;
     final availableWidth = arenaSize.width - padding * 2;
-    final blockSize = (availableWidth / cols).clamp(20.0, 34.0);
+    const topOffset = 50.0;
+    final availableHeight = (arenaSize.height - topOffset - 65.0).clamp(100.0, 2000.0);
+
+    final blockSizeByWidth = availableWidth / cols;
+    final blockSizeByHeight = availableHeight / rows;
+    final blockSize = min(blockSizeByWidth, blockSizeByHeight).clamp(18.0, 36.0);
+    gridBlockSize = blockSize;
 
     final gridWidth = cols * blockSize;
-    final startX = (arenaSize.width - gridWidth) / 2;
-    const startY = 65.0; // Khoảng cách từ đỉnh màn hình
+    final gridHeight = rows * blockSize;
+    gridStartX = (arenaSize.width - gridWidth) / 2;
+    gridStartY = topOffset + (availableHeight - gridHeight) / 2;
 
-    totalBlocksCount = cols * rows;
-    brokenBlocksCount = 0;
-    completionPercent = 0.0;
+    // Đặt vị trí Quả cầu xuất phát chính xác tại TÂM của thế giới pixel
+    final gridCenterX = gridStartX + gridWidth / 2;
+    final gridCenterY = gridStartY + gridHeight / 2;
+    player.transform.x = gridCenterX;
+    player.transform.y = gridCenterY;
+
+    final centerCol = (cols - 1) / 2.0;
+    final centerRow = (rows - 1) / 2.0;
+
+    int breakableCount = 0;
 
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
         final memeColor = level.colorGrid[r][c];
-        final bx = startX + c * blockSize + blockSize / 2;
-        final by = startY + r * blockSize + blockSize / 2;
+        final bx = gridStartX + c * blockSize + blockSize / 2;
+        final by = gridStartY + r * blockSize + blockSize / 2;
+
+        // Buồng khởi đầu 4x4 ở tâm
+        final isCenterChamber = (r - centerRow).abs() <= 1.5 && (c - centerCol).abs() <= 1.5;
 
         final block = PixelBlock(
           id: 'block_${r}_$c',
@@ -146,9 +191,23 @@ class GameEngine extends ChangeNotifier {
           row: r,
           memeColor: memeColor,
         );
+
+        if (isCenterChamber) {
+          // Khối trung tâm đã được khai mở sẵn làm buồng nảy ban đầu
+          block.health!.currentHp = 0;
+          block.health!.isDestroyed = true;
+          block.isRevealed = true;
+        } else {
+          breakableCount++;
+        }
+
         blocks.add(block);
       }
     }
+
+    totalBlocksCount = breakableCount > 0 ? breakableCount : 1;
+    brokenBlocksCount = 0;
+    completionPercent = 0.0;
   }
 
   void update(double dt) {

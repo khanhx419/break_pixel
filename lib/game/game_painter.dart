@@ -77,6 +77,23 @@ class GamePainter extends CustomPainter {
     for (double y = 0; y < size.height; y += step) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
+    // Khung viền thế giới Pixel mà người chơi cần phá vỡ để thoát ra
+    final gridWidth = engine.level.cols * engine.gridBlockSize;
+    final gridHeight = engine.level.rows * engine.gridBlockSize;
+    final worldRect = Rect.fromLTWH(engine.gridStartX, engine.gridStartY, gridWidth, gridHeight);
+
+    paint.color = Colors.cyanAccent.withOpacity(0.25);
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = 2.0;
+    canvas.drawRect(worldRect, paint);
+
+    // Hào quang lõi khởi đầu ở tâm thế giới pixel
+    final centerX = engine.gridStartX + gridWidth / 2;
+    final centerY = engine.gridStartY + gridHeight / 2;
+    final coreRiftPaint = Paint()
+      ..color = Colors.cyanAccent.withOpacity(0.08)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(centerX, centerY), engine.gridBlockSize * 2.2, coreRiftPaint);
   }
 
   void _drawRevealedMemeLayer(Canvas canvas, Paint paint) {
