@@ -78,6 +78,8 @@ class GameEngine extends ChangeNotifier {
   double gridStartY = 0;
   double gridBlockSize = 28;
 
+  bool isGridBuilt = false;
+
   void _initEngine() {
     // Tốc độ nảy cơ bản
     double speed = 220.0 * (1.0 + race.bounceBonus + bounceUpgradeLevel * 0.1);
@@ -98,19 +100,18 @@ class GameEngine extends ChangeNotifier {
       role: role,
       race: race,
     );
-
-    _buildPixelGrid();
   }
 
   void resize(Size newSize) {
-    if (arenaSize == newSize) return;
-    final isFirstSetup = blocks.isEmpty;
+    if (arenaSize == newSize && isGridBuilt) return;
+    final isFirstSetup = !isGridBuilt;
     final oldWidth = level.cols * gridBlockSize;
     final oldHeight = level.rows * gridBlockSize;
     final oldCenter = Offset(gridStartX + oldWidth / 2, gridStartY + oldHeight / 2);
     arenaSize = newSize;
 
     if (isFirstSetup) {
+      isGridBuilt = true;
       _buildPixelGrid();
     } else {
       // Điều chỉnh lại vị trí grid khi thay đổi kích thước mà vẫn giữ nguyên vị trí bóng trong không gian
@@ -181,13 +182,17 @@ class GameEngine extends ChangeNotifier {
 
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
+        // Nếu là ô trống trung tâm (buồng rỗng khởi đầu): HOÀN TOÀN BỎ QUA, KHÔNG TẠO KHỐI TẠI ĐÂY!
+        final isCenterEmpty = (r == centerRow1 || r == centerRow2) &&
+                              (c == centerCol1 || c == centerCol2);
+
+        if (isCenterEmpty) {
+          continue; // ĐÂY LÀ PHÒNG TRỐNG! KHÔNG CÓ BỨC TƯỜNG NÀO TẠI ĐÂY!
+        }
+
         final memeColor = level.colorGrid[r][c];
         final bx = gridStartX + c * blockSize + blockSize / 2;
         final by = gridStartY + r * blockSize + blockSize / 2;
-
-        // Các ô trống ban đầu tạo nên không gian rỗng để bóng nảy va vào tường bao quanh
-        final isCenterEmpty = (r == centerRow1 || r == centerRow2) &&
-                              (c == centerCol1 || c == centerCol2);
 
         final block = PixelBlock(
           id: 'block_${r}_$c',
@@ -205,15 +210,7 @@ class GameEngine extends ChangeNotifier {
           memeColor: memeColor,
         );
 
-        if (isCenterEmpty) {
-          // Các ô trống ban đầu được mở sẵn làm không gian xuất phát
-          block.health!.currentHp = 0;
-          block.health!.isDestroyed = true;
-          block.isRevealed = true;
-        } else {
-          breakableCount++;
-        }
-
+        breakableCount++;
         blocks.add(block);
       }
     }
@@ -222,6 +219,7 @@ class GameEngine extends ChangeNotifier {
     brokenBlocksCount = 0;
     completionPercent = 0.0;
   }
+
 
   void update(double dt) {
     if (isLevelCompleted) return;

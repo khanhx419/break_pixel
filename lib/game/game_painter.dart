@@ -87,20 +87,23 @@ class GamePainter extends CustomPainter {
     paint.strokeWidth = 2.0;
     canvas.drawRect(worldRect, paint);
 
-    // Hào quang lõi khởi đầu ở tâm thế giới pixel (buồng rỗng 2x2)
+    // Vẽ nền sàn và viền neon cho buồng rỗng 2x2 ở tâm
     final centerX = engine.gridStartX + gridWidth / 2;
     final centerY = engine.gridStartY + gridHeight / 2;
-    final coreRiftPaint = Paint()
-      ..color = Colors.cyanAccent.withOpacity(0.15)
-      ..style = PaintingStyle.fill;
-    canvas.drawRect(
-      Rect.fromCenter(
-        center: Offset(centerX, centerY),
-        width: engine.gridBlockSize * 2,
-        height: engine.gridBlockSize * 2,
-      ),
-      coreRiftPaint,
+    final chamberRect = Rect.fromCenter(
+      center: Offset(centerX, centerY),
+      width: engine.gridBlockSize * 2,
+      height: engine.gridBlockSize * 2,
     );
+
+    paint.color = const Color(0xFF0D1527);
+    paint.style = PaintingStyle.fill;
+    canvas.drawRect(chamberRect, paint);
+
+    paint.color = Colors.cyanAccent.withOpacity(0.65);
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = 2.0;
+    canvas.drawRect(chamberRect, paint);
   }
 
   void _drawRevealedMemeLayer(Canvas canvas, Paint paint) {
