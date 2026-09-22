@@ -142,7 +142,8 @@ class GamePainter extends CustomPainter {
     // Vệt chém hình vòng cung phát sáng rực rỡ (Slash Arc Trail)
     if (player.role.type == RoleType.warrior ||
         player.role.type == RoleType.farmer ||
-        player.role.type == RoleType.lumberjack) {
+        player.role.type == RoleType.lumberjack ||
+        player.role.type == RoleType.fisherman) {
       const segments = 5;
       const totalSweep = 0.85;
       for (int i = 0; i < segments; i++) {

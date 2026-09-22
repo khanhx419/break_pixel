@@ -8,6 +8,7 @@ class PixelBlock extends GameEntity {
   final int col;
   final int row;
   final Color memeColor;
+  final bool isCenterEmpty;
   bool isRevealed = false;
   double hitFlashTimer = 0.0;
 
@@ -20,6 +21,7 @@ class PixelBlock extends GameEntity {
     required this.col,
     required this.row,
     required this.memeColor,
+    this.isCenterEmpty = false,
   });
 
   @override

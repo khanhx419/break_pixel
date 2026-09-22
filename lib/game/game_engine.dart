@@ -215,6 +215,7 @@ class GameEngine extends ChangeNotifier {
           col: c,
           row: r,
           memeColor: memeColor,
+          isCenterEmpty: isCenterEmpty,
         );
 
         if (isCenterEmpty) {
@@ -233,6 +234,19 @@ class GameEngine extends ChangeNotifier {
     totalBlocksCount = breakableCount > 0 ? breakableCount : 1;
     brokenBlocksCount = 0;
     completionPercent = 0.0;
+  }
+
+  int get actualBrokenBlocksCount =>
+      blocks.where((b) => b.health!.isDestroyed && !b.isCenterEmpty).length;
+
+  void _updateCompletion() {
+    brokenBlocksCount = actualBrokenBlocksCount;
+    completionPercent = (brokenBlocksCount / totalBlocksCount).clamp(0.0, 1.0);
+    if (brokenBlocksCount >= totalBlocksCount && !isLevelCompleted) {
+      isLevelCompleted = true;
+      AudioService.playVictory();
+      onVictory?.call();
+    }
   }
 
 
@@ -298,6 +312,9 @@ class GameEngine extends ChangeNotifier {
     for (final b in blocks) {
       if (!b.health!.isDestroyed) {
         b.update(dt);
+        if (b.health!.isDestroyed) {
+          _onBlockDestroyed(b);
+        }
       }
     }
 
@@ -307,6 +324,9 @@ class GameEngine extends ChangeNotifier {
     // 8. Cập nhật Hạt vỡ & Chữ bay
     debris.removeWhere((p) => p.update(dt));
     floatingTexts.removeWhere((t) => t.update(dt));
+
+    // 9. Đồng bộ chuẩn xác 100% thanh tiến trình & kiểm tra chiến thắng
+    _updateCompletion();
 
     notifyListeners();
   }
@@ -462,11 +482,18 @@ class GameEngine extends ChangeNotifier {
         break;
 
       case RoleType.fisherman:
-        // Người đánh cá phóng cần câu giật kéo
+        // Cần câu quay quanh bóng quất mạnh vào các khối pixel
+        final rodTip = Offset(
+          center.dx + cos(wAngle) * wRange * 0.85,
+          center.dy + sin(wAngle) * wRange * 0.85,
+        );
+        _checkMeleeLineCollision(center, rodTip, totalDamage * 1.0, dt, 'QUẤT CẦU');
+
+        // Người đánh cá phóng cần câu giật kéo theo chu kỳ
         if (player.attackCooldown <= 0) {
-          player.attackCooldown = 1.2 / totalAttackSpeed;
-          final hookVx = cos(wAngle) * 320.0;
-          final hookVy = sin(wAngle) * 320.0;
+          player.attackCooldown = 1.0 / totalAttackSpeed;
+          final hookVx = cos(wAngle) * 360.0;
+          final hookVy = sin(wAngle) * 360.0;
           hooks.add(HookEntity(
             id: 'hook_${DateTime.now().millisecondsSinceEpoch}',
             transform: TransformComponent(
@@ -477,7 +504,7 @@ class GameEngine extends ChangeNotifier {
               width: 12,
               height: 12,
             ),
-            damage: totalDamage * 1.1,
+            damage: totalDamage * 1.25,
             origin: center,
           ));
         }
@@ -654,8 +681,11 @@ class GameEngine extends ChangeNotifier {
     for (final b in blocks) {
       if (b == origin || b.health!.isDestroyed) continue;
       if ((b.transform.position - origin.transform.position).distance < 60) {
-        b.health!.takeDamage(totalDamage * 0.5);
+        final killed = b.health!.takeDamage(totalDamage * 0.5);
         b.elementAffinity?.applyFire(2.5, totalDamage * 0.25);
+        if (killed) {
+          _onBlockDestroyed(b);
+        }
       }
     }
   }
@@ -682,8 +712,11 @@ class GameEngine extends ChangeNotifier {
           b.transform.position,
           Colors.yellowAccent,
         ));
-        b.health!.takeDamage(totalDamage * 0.7);
+        final killed = b.health!.takeDamage(totalDamage * 0.7);
         b.elementAffinity?.applyShock(1.5);
+        if (killed) {
+          _onBlockDestroyed(b);
+        }
         break;
       }
     }
@@ -700,13 +733,16 @@ class GameEngine extends ChangeNotifier {
           b.transform.position,
           Colors.yellowAccent,
         ));
-        b.health!.takeDamage(totalDamage * 0.9);
+        final killed = b.health!.takeDamage(totalDamage * 0.9);
         floatingTexts.add(FloatingText(
           text: '⚡ SÉT!',
           x: b.transform.x,
           y: b.transform.y,
           color: Colors.yellowAccent,
         ));
+        if (killed) {
+          _onBlockDestroyed(b);
+        }
         chainCount++;
         if (chainCount >= 5) break;
       }
@@ -714,8 +750,7 @@ class GameEngine extends ChangeNotifier {
   }
 
   void _onBlockDestroyed(PixelBlock block) {
-    brokenBlocksCount++;
-    completionPercent = (brokenBlocksCount / totalBlocksCount).clamp(0.0, 1.0);
+    _updateCompletion();
 
     // Kích hoạt Rung giật màn hình vừa vặn (2.5px), sóng xung kích và âm thanh nổ vỡ
     screenShake = max(screenShake, 2.5);
