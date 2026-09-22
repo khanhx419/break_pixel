@@ -85,6 +85,37 @@ class VictoryModal extends StatelessWidget {
                 ),
               ),
 
+              const SizedBox(height: 14),
+
+              // Khung tranh hiển thị toàn bộ bức ảnh meme đã mở khóa
+              Container(
+                width: 170,
+                height: 170,
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isFinalStoryLevel ? Colors.cyanAccent : Colors.amberAccent,
+                    width: 2.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isFinalStoryLevel ? Colors.cyanAccent : Colors.amberAccent)
+                          .withOpacity(0.4),
+                      blurRadius: 18,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CustomPaint(
+                    painter: _MemeArtPainter(colorGrid: level.colorGrid),
+                  ),
+                ),
+              ),
+
               const SizedBox(height: 16),
 
               // Nếu là màn cuối Story Mode: Phần thưởng Yeti
@@ -189,4 +220,31 @@ class VictoryModal extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MemeArtPainter extends CustomPainter {
+  final List<List<Color>> colorGrid;
+  _MemeArtPainter({required this.colorGrid});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rows = colorGrid.length;
+    final cols = colorGrid[0].length;
+    final cellW = size.width / cols;
+    final cellH = size.height / rows;
+    final paint = Paint();
+
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        paint.color = colorGrid[r][c];
+        canvas.drawRect(
+          Rect.fromLTWH(c * cellW, r * cellH, cellW + 0.5, cellH + 0.5),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

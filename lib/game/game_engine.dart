@@ -182,17 +182,12 @@ class GameEngine extends ChangeNotifier {
 
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
-        // Nếu là ô trống trung tâm (buồng rỗng khởi đầu): HOÀN TOÀN BỎ QUA, KHÔNG TẠO KHỐI TẠI ĐÂY!
-        final isCenterEmpty = (r == centerRow1 || r == centerRow2) &&
-                              (c == centerCol1 || c == centerCol2);
-
-        if (isCenterEmpty) {
-          continue; // ĐÂY LÀ PHÒNG TRỐNG! KHÔNG CÓ BỨC TƯỜNG NÀO TẠI ĐÂY!
-        }
-
         final memeColor = level.colorGrid[r][c];
         final bx = gridStartX + c * blockSize + blockSize / 2;
         final by = gridStartY + r * blockSize + blockSize / 2;
+
+        final isCenterEmpty = (r == centerRow1 || r == centerRow2) &&
+                              (c == centerCol1 || c == centerCol2);
 
         final block = PixelBlock(
           id: 'block_${r}_$c',
@@ -210,7 +205,15 @@ class GameEngine extends ChangeNotifier {
           memeColor: memeColor,
         );
 
-        breakableCount++;
+        if (isCenterEmpty) {
+          // Ô trung tâm: Lớp vỏ đã bị phá từ trước, HÌNH ẢNH ẨN BÊN DƯỚI ĐƯỢC HIỆN RA
+          block.health!.currentHp = 0;
+          block.health!.isDestroyed = true;
+          block.isRevealed = true;
+        } else {
+          breakableCount++;
+        }
+
         blocks.add(block);
       }
     }

@@ -96,11 +96,8 @@ class GamePainter extends CustomPainter {
       height: engine.gridBlockSize * 2,
     );
 
-    paint.color = const Color(0xFF0D1527);
-    paint.style = PaintingStyle.fill;
-    canvas.drawRect(chamberRect, paint);
-
-    paint.color = Colors.cyanAccent.withOpacity(0.65);
+    // Viền neon làm nổi bật buồng xuất phát ở tâm trên nền ảnh ẩn
+    paint.color = Colors.cyanAccent.withOpacity(0.7);
     paint.style = PaintingStyle.stroke;
     paint.strokeWidth = 2.0;
     canvas.drawRect(chamberRect, paint);
