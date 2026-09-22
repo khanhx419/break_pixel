@@ -5,6 +5,7 @@ import '../models/character.dart';
 import '../models/element.dart';
 import '../models/pixel_art_data.dart';
 import '../models/game_entities.dart';
+import '../core/audio_service.dart';
 
 class GameEngine extends ChangeNotifier {
   late PlayerBall player;
@@ -20,6 +21,11 @@ class GameEngine extends ChangeNotifier {
   List<PixelDebris> debris = [];
   List<FloatingText> floatingTexts = [];
   List<MistZone> mistZones = [];
+  List<ShockwaveRing> shockwaves = [];
+
+  // Hiệu ứng Rung lắc màn hình (Screen Shake)
+  double screenShake = 0.0;
+  Offset shakeOffset = Offset.zero;
 
   // Hệ thống nguyên tố sở hữu
   final Set<ElementType> ownedElements = {};
@@ -226,6 +232,21 @@ class GameEngine extends ChangeNotifier {
 
   void update(double dt) {
     if (isLevelCompleted) return;
+
+    // Giảm dần độ rung màn hình (Screen Shake decay)
+    if (screenShake > 0) {
+      screenShake = max(0.0, screenShake - dt * 26.0);
+      final rng = Random();
+      shakeOffset = Offset(
+        (rng.nextDouble() - 0.5) * 2 * screenShake,
+        (rng.nextDouble() - 0.5) * 2 * screenShake,
+      );
+    } else {
+      shakeOffset = Offset.zero;
+    }
+
+    // Cập nhật các vòng sóng xung kích (Shockwaves)
+    shockwaves.removeWhere((sw) => sw.update(dt));
 
     // 1. Cập nhật Nhân vật (Vị trí & Góc vũ khí)
     player.update(dt);
@@ -526,6 +547,11 @@ class GameEngine extends ChangeNotifier {
       _triggerChainLightning(block);
     }
 
+    // Chớp sáng trắng khi bị đánh trúng & Rung nhẹ & Âm thanh va chạm
+    block.hitFlashTimer = 0.08;
+    screenShake = max(screenShake, 3.2);
+    AudioService.playHit();
+
     final justDestroyed = block.health!.takeDamage(dmg);
 
     if (justDestroyed) {
@@ -535,6 +561,7 @@ class GameEngine extends ChangeNotifier {
 
   void _triggerChainLightning(PixelBlock origin) {
     int chainCount = 0;
+    AudioService.playLightning();
     for (final b in blocks) {
       if (b == origin || b.health!.isDestroyed) continue;
       if ((b.transform.position - origin.transform.position).distance < 75) {
@@ -555,21 +582,29 @@ class GameEngine extends ChangeNotifier {
     brokenBlocksCount++;
     completionPercent = (brokenBlocksCount / totalBlocksCount).clamp(0.0, 1.0);
 
-    // Kích hoạt Callback âm thanh vỡ giòn tan & rung màn hình
+    // Kích hoạt Rung giật màn hình mạnh & Sóng xung kích & Âm thanh nổ vỡ
+    screenShake = max(screenShake, 9.0);
+    AudioService.playBlockBreak();
+    shockwaves.add(ShockwaveRing(
+      center: block.transform.position,
+      color: block.memeColor,
+    ));
     onBlockDestroyedEffect?.call();
 
-    // 1. Tạo các hạt vỡ nổ tung (Debris)
+    // 1. Tạo các hạt vỡ nổ tung (Debris) nhiều và xoay sống động
     final rng = Random();
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 14; i++) {
       final pAngle = rng.nextDouble() * 2 * pi;
-      final pSpeed = rng.nextDouble() * 120 + 40;
+      final pSpeed = rng.nextDouble() * 160 + 50;
       debris.add(PixelDebris(
         x: block.transform.x,
         y: block.transform.y,
         vx: cos(pAngle) * pSpeed,
         vy: sin(pAngle) * pSpeed,
-        size: rng.nextDouble() * 4 + 3,
-        color: block.memeColor,
+        size: rng.nextDouble() * 5 + 3,
+        color: (i % 3 == 0) ? Colors.white : block.memeColor,
+        rotSpeed: (rng.nextDouble() - 0.5) * 14.0,
+        isSparkle: i % 4 == 0,
       ));
     }
 
@@ -616,6 +651,7 @@ class GameEngine extends ChangeNotifier {
     // Kiểm tra chiến thắng màn chơi khi phá sạch hoặc đạt 100%
     if (brokenBlocksCount >= totalBlocksCount) {
       isLevelCompleted = true;
+      AudioService.playVictory();
       onVictory?.call();
     }
   }
@@ -647,6 +683,7 @@ class GameEngine extends ChangeNotifier {
         } else {
           addExp(drop.value);
         }
+        AudioService.playCoinCollect();
         drops.removeAt(i);
       } else if (drop.lifeTime <= 0) {
         drops.removeAt(i);
@@ -660,6 +697,7 @@ class GameEngine extends ChangeNotifier {
       exp -= expToNextLevel;
       characterLevel++;
       expToNextLevel = (expToNextLevel * 1.35).roundToDouble();
+      AudioService.playLevelUp();
       onLevelUp?.call();
     }
   }

@@ -10,6 +10,12 @@ class GamePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.save();
+    // Áp dụng rung lắc màn hình (Screen Shake)
+    if (engine.shakeOffset != Offset.zero) {
+      canvas.translate(engine.shakeOffset.dx, engine.shakeOffset.dy);
+    }
+
     final paint = Paint();
 
     // 1. Vẽ nền không gian Arena phong cách viễn tưởng
@@ -28,12 +34,17 @@ class GamePainter extends CustomPainter {
       block.draw(canvas, paint);
     }
 
-    // 5. Vẽ Vật phẩm rơi (Gold & EXP Gems)
+    // 5. Vẽ Sóng xung kích phát sáng nổ vỡ (Shockwaves)
+    for (final sw in engine.shockwaves) {
+      sw.draw(canvas, paint);
+    }
+
+    // 6. Vẽ Vật phẩm rơi (Gold & EXP Gems)
     for (final drop in engine.drops) {
       drop.draw(canvas, paint);
     }
 
-    // 6. Vẽ Mũi tên & Móc câu
+    // 7. Vẽ Mũi tên & Móc câu
     for (final arrow in engine.arrows) {
       arrow.draw(canvas, paint);
     }
@@ -41,19 +52,21 @@ class GamePainter extends CustomPainter {
       hook.draw(canvas, paint);
     }
 
-    // 7. Vẽ Vũ khí gắn liền với nhân vật
+    // 8. Vẽ Vũ khí gắn liền với nhân vật
     _drawWeapon(canvas, paint);
 
-    // 8. Vẽ Quả cầu Nhân vật 3D (Player Ball)
+    // 9. Vẽ Quả cầu Nhân vật 3D (Player Ball)
     engine.player.draw(canvas, paint);
 
-    // 9. Vẽ Hạt nổ tung (Debris)
+    // 10. Vẽ Hạt nổ tung (Debris)
     for (final p in engine.debris) {
       p.draw(canvas, paint);
     }
 
-    // 10. Vẽ Chữ số sát thương & text trạng thái bay lên
+    // 11. Vẽ Chữ số sát thương & text trạng thái bay lên
     _drawFloatingTexts(canvas);
+
+    canvas.restore();
   }
 
   void _drawBackground(Canvas canvas, Size size, Paint paint) {
@@ -125,6 +138,32 @@ class GamePainter extends CustomPainter {
     final center = player.transform.position;
     final angle = player.weaponAngle;
     final range = engine.totalWeaponRange;
+
+    // Vệt chém hình vòng cung phát sáng rực rỡ (Slash Arc Trail)
+    if (player.role.type == RoleType.warrior ||
+        player.role.type == RoleType.farmer ||
+        player.role.type == RoleType.lumberjack) {
+      const segments = 5;
+      const totalSweep = 0.85;
+      for (int i = 0; i < segments; i++) {
+        final t = (i + 1) / segments;
+        final segStart = angle - totalSweep + (i * totalSweep / segments);
+        final segSweep = totalSweep / segments;
+        final slashPaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = 1.5 + t * 4.5
+          ..color = Color.lerp(player.role.themeColor, Colors.white, t * 0.7)!
+              .withOpacity(t * 0.6);
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: range * 0.88),
+          segStart,
+          segSweep,
+          false,
+          slashPaint,
+        );
+      }
+    }
 
     canvas.save();
     canvas.translate(center.dx, center.dy);

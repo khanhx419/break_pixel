@@ -9,6 +9,7 @@ class PixelBlock extends GameEntity {
   final int row;
   final Color memeColor;
   bool isRevealed = false;
+  double hitFlashTimer = 0.0;
 
   PixelBlock({
     required super.id,
@@ -23,6 +24,7 @@ class PixelBlock extends GameEntity {
 
   @override
   void update(double dt) {
+    if (hitFlashTimer > 0) hitFlashTimer -= dt;
     elementAffinity?.update(dt);
     // Sát thương theo thời gian từ Lửa (Burn) hoặc Độc (Poison)
     if (elementAffinity != null) {
@@ -41,6 +43,14 @@ class PixelBlock extends GameEntity {
 
     final rect = transform.rect;
     final r = RRect.fromRectAndRadius(rect.deflate(1.5), const Radius.circular(3));
+
+    // Hiệu ứng chớp sáng trắng khi bị đánh trúng (Hit Flash)
+    if (hitFlashTimer > 0) {
+      paint.color = Colors.white;
+      paint.style = PaintingStyle.fill;
+      canvas.drawRRect(r, paint);
+      return;
+    }
 
     // Nếu bị đóng băng
     if (elementAffinity?.isFrozen ?? false) {
@@ -113,6 +123,7 @@ class PlayerBall extends GameEntity {
   double radius;
   double weaponAngle = 0.0;
   double attackCooldown = 0.0;
+  final List<Offset> trail = [];
 
   PlayerBall({
     required super.id,
@@ -134,6 +145,10 @@ class PlayerBall extends GameEntity {
     transform.x += transform.vx * dt;
     transform.y += transform.vy * dt;
 
+    // Lưu vệt chuyển động sao chổi
+    trail.insert(0, Offset(transform.x, transform.y));
+    if (trail.length > 8) trail.removeLast();
+
     // Xoay vũ khí
     final speedMultiplier = race.speedMultiplier;
     weaponAngle += (role.attackSpeed * speedMultiplier * 4.5) * dt;
@@ -145,6 +160,18 @@ class PlayerBall extends GameEntity {
   @override
   void draw(Canvas canvas, Paint paint) {
     final center = transform.position;
+
+    // 0. Vẽ vệt chuyển động sao chổi phía sau bóng (Comet Motion Trail)
+    for (int i = trail.length - 1; i >= 0; i--) {
+      final tPos = trail[i];
+      final tProgress = 1.0 - (i / trail.length);
+      final tAlpha = tProgress * 0.35;
+      final tRadius = radius * (0.4 + 0.6 * tProgress);
+      final trailPaint = Paint()
+        ..color = role.themeColor.withOpacity(tAlpha)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      canvas.drawCircle(tPos, tRadius, trailPaint);
+    }
 
     // 1. Nếu là Tộc Yeti: Vẽ hào quang băng giá (Frost Aura)
     if (race.type == RaceType.yeti) {
@@ -323,7 +350,34 @@ class DropItem extends GameEntity {
   }
 }
 
-/// Hạt vỡ Pixel nổ tung (Debris Particles)
+/// Vòng sóng xung kích phát sáng nổ bung khi khối pixel vỡ
+class ShockwaveRing {
+  Offset center;
+  double radius = 4.0;
+  double maxRadius = 48.0;
+  Color color;
+  double lifeTime = 0.28;
+  double currentLife = 0.28;
+
+  ShockwaveRing({required this.center, required this.color});
+
+  bool update(double dt) {
+    currentLife -= dt;
+    final progress = 1.0 - (currentLife / lifeTime).clamp(0.0, 1.0);
+    radius = 4.0 + (maxRadius - 4.0) * progress;
+    return currentLife <= 0;
+  }
+
+  void draw(Canvas canvas, Paint paint) {
+    final alpha = (currentLife / lifeTime).clamp(0.0, 1.0);
+    paint.color = color.withOpacity(alpha * 0.8);
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = 3.0 * alpha;
+    canvas.drawCircle(center, radius, paint);
+  }
+}
+
+/// Hạt vỡ Pixel nổ tung sống động có góc xoay và trọng lực
 class PixelDebris {
   double x;
   double y;
@@ -332,7 +386,11 @@ class PixelDebris {
   double size;
   Color color;
   double alpha = 1.0;
-  double lifeTime = 0.5;
+  double lifeTime = 0.65;
+  double maxLife = 0.65;
+  double rotation = 0.0;
+  double rotSpeed;
+  bool isSparkle;
 
   PixelDebris({
     required this.x,
@@ -341,20 +399,34 @@ class PixelDebris {
     required this.vy,
     required this.size,
     required this.color,
+    this.rotSpeed = 0.0,
+    this.isSparkle = false,
   });
 
   bool update(double dt) {
     x += vx * dt;
     y += vy * dt;
+    vy += 190 * dt; // Trọng lực nhẹ rơi xuống
+    rotation += rotSpeed * dt;
     lifeTime -= dt;
-    alpha = (lifeTime / 0.5).clamp(0.0, 1.0);
+    alpha = (lifeTime / maxLife).clamp(0.0, 1.0);
     return lifeTime <= 0;
   }
 
   void draw(Canvas canvas, Paint paint) {
     paint.color = color.withOpacity(alpha);
     paint.style = PaintingStyle.fill;
-    canvas.drawRect(Rect.fromLTWH(x, y, size, size), paint);
+    canvas.save();
+    canvas.translate(x, y);
+    canvas.rotate(rotation);
+    if (isSparkle) {
+      paint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+      canvas.drawCircle(Offset.zero, size * 0.8, paint);
+      paint.maskFilter = null;
+    } else {
+      canvas.drawRect(Rect.fromCenter(center: Offset.zero, width: size, height: size), paint);
+    }
+    canvas.restore();
   }
 }
 
@@ -375,7 +447,7 @@ class FloatingText {
   });
 
   bool update(double dt) {
-    y -= 35 * dt; // Bay lên trên
+    y -= 38 * dt; // Bay lên trên
     lifeTime -= dt;
     alpha = (lifeTime / 0.8).clamp(0.0, 1.0);
     return lifeTime <= 0;

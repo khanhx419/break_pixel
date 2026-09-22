@@ -47,6 +47,112 @@
         for (let name of names) caches.delete(name);
       });
     }
+
+    // Web Audio Synthesizer: Âm thanh arcade chân thực, không độ trễ
+    window.playRetroSound = function(type) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = window._audioCtx || (window._audioCtx = new AudioCtx());
+        if (ctx.state === 'suspended') ctx.resume();
+        const t = ctx.currentTime;
+
+        if (type === 'break') {
+          // Tiếng vỡ gạch / đá giòn tan (Glass & Rock Shatter)
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(320, t);
+          osc.frequency.exponentialRampToValueAtTime(35, t + 0.15);
+          gain.gain.setValueAtTime(0.4, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.16);
+
+          // Tạo thêm tiếng nổ phụ tần số cao
+          const snap = ctx.createOscillator();
+          const snapGain = ctx.createGain();
+          snap.type = 'square';
+          snap.frequency.setValueAtTime(800, t);
+          snap.frequency.exponentialRampToValueAtTime(100, t + 0.08);
+          snapGain.gain.setValueAtTime(0.25, t);
+          snapGain.gain.exponentialRampToValueAtTime(0.01, t + 0.08);
+          snap.connect(snapGain);
+          snapGain.connect(ctx.destination);
+          snap.start(t);
+          snap.stop(t + 0.09);
+        } else if (type === 'hit') {
+          // Tiếng gõ va chạm nhẹ
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(180, t);
+          osc.frequency.exponentialRampToValueAtTime(70, t + 0.05);
+          gain.gain.setValueAtTime(0.12, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + 0.05);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.06);
+        } else if (type === 'coin') {
+          // Tiếng nhặt tiền leng keng đôi nốt cao (Ching-Ching!)
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(987.77, t); // B5
+          osc.frequency.setValueAtTime(1318.51, t + 0.06); // E6
+          gain.gain.setValueAtTime(0.22, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.21);
+        } else if (type === 'levelup') {
+          // Âm thanh thăng cấp vui nhộn (Fanfare Chord)
+          [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, t + idx * 0.07);
+            gain.gain.setValueAtTime(0.3, t + idx * 0.07);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + idx * 0.07 + 0.25);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(t + idx * 0.07);
+            osc.stop(t + idx * 0.07 + 0.26);
+          });
+        } else if (type === 'lightning') {
+          // Tiếng giật sét lôi đình
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(900, t);
+          osc.frequency.linearRampToValueAtTime(120, t + 0.14);
+          gain.gain.setValueAtTime(0.3, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + 0.14);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.15);
+        } else if (type === 'victory') {
+          // Tiếng chiến thắng hoành tráng
+          [440.0, 554.37, 659.25, 880.0, 1108.73].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, t + idx * 0.09);
+            gain.gain.setValueAtTime(0.35, t + idx * 0.09);
+            gain.gain.exponentialRampToValueAtTime(0.01, t + idx * 0.09 + 0.35);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(t + idx * 0.09);
+            osc.stop(t + idx * 0.09 + 0.36);
+          });
+        }
+      } catch(e) {}
+    };
   </script>
 </head>
 <body>
