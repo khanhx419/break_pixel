@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../game/game_engine.dart';
 import '../models/element.dart';
 
-enum ChoiceKind { element, damage, speed, magnet, gold }
+enum ChoiceKind { element, damage, speed, magnet, gold, spin, spirit }
 
 class LevelUpOption {
   final ChoiceKind kind;
@@ -43,8 +43,8 @@ class LevelUpModal extends StatelessWidget {
         .toList();
     unownedElements.shuffle(rng);
 
-    // Lấy tối đa 3 nguyên tố chưa sở hữu
-    for (final el in unownedElements.take(3)) {
+    // Lấy tối đa 2 nguyên tố chưa sở hữu
+    for (final el in unownedElements.take(2)) {
       choices.add(LevelUpOption(
         kind: ChoiceKind.element,
         element: el,
@@ -55,8 +55,23 @@ class LevelUpModal extends StatelessWidget {
       ));
     }
 
-    // 2. Danh sách các thẻ Cường Hóa Chỉ Số dự phòng (khi thiếu nguyên tố mới hoặc đã sở hữu hết)
+    // 2. Danh sách các thẻ Cường Hóa Chỉ Số & Kỹ Năng Sáng Tạo Đặc Biệt
     final List<LevelUpOption> statOptions = [
+      if (engine.spirits.length < 4)
+        LevelUpOption(
+          kind: ChoiceKind.spirit,
+          title: '🧚 Triệu Hồi Tinh Linh Hộ Vệ',
+          description: 'Gọi 1 tiểu tinh linh bay xoay quanh bóng, tự động húc và thiêu đốt/đóng băng các khối pixel.',
+          icon: Icons.auto_awesome,
+          color: Colors.amberAccent,
+        ),
+      LevelUpOption(
+        kind: ChoiceKind.spin,
+        title: '🌀 Cuồng Vũ Xoay Kiếm (+40% Tốc Độ Xoay)',
+        description: 'Vũ khí xoay tít với tốc độ cuồng phong bão lốc, càn quét toàn bộ khối xung quanh.',
+        icon: Icons.cyclone,
+        color: Colors.cyanAccent,
+      ),
       LevelUpOption(
         kind: ChoiceKind.damage,
         title: 'Cường Hóa Sát Thương (+25%)',
@@ -66,8 +81,8 @@ class LevelUpModal extends StatelessWidget {
       ),
       LevelUpOption(
         kind: ChoiceKind.speed,
-        title: 'Tăng Tốc Đánh & Xoay (+20%)',
-        description: 'Vũ khí xoay nhanh hơn, nhịp bắn và vung liềm dày hơn đáng kể.',
+        title: 'Tăng Tốc Đánh & Nảy (+20%)',
+        description: 'Quả bóng nảy nhanh hơn và nhịp ra đòn dày đặc hơn đáng kể.',
         icon: Icons.speed,
         color: Colors.tealAccent,
       ),
@@ -88,7 +103,7 @@ class LevelUpModal extends StatelessWidget {
     ];
     statOptions.shuffle(rng);
 
-    // 3. Nếu chưa đủ 3 lựa chọn, bù đắp bằng các thẻ nâng cấp chỉ số
+    // 3. Nếu chưa đủ 3 lựa chọn, bù đắp bằng các thẻ nâng cấp kỹ năng
     for (final stat in statOptions) {
       if (choices.length >= 3) break;
       choices.add(stat);
@@ -103,6 +118,12 @@ class LevelUpModal extends StatelessWidget {
         if (choice.element != null) {
           engine.addElement(choice.element!.type);
         }
+        break;
+      case ChoiceKind.spirit:
+        engine.summonSpirit();
+        break;
+      case ChoiceKind.spin:
+        engine.upgradeSpinSpeed();
         break;
       case ChoiceKind.damage:
         engine.damageUpgradeLevel += 2;

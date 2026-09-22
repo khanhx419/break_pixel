@@ -94,6 +94,7 @@ class ElementAffinityComponent {
   double frozenTimer = 0;
   double poisonTimer = 0;    // Bị nhiễm độc
   double poisonDps = 0;
+  double shockTimer = 0;     // Bị giật điện / nhiễm sét
 
   void applyFire(double duration, double dps) {
     burnTimer = duration;
@@ -121,6 +122,10 @@ class ElementAffinityComponent {
     poisonDps = dps;
   }
 
+  void applyShock(double duration) {
+    shockTimer = duration;
+  }
+
   void update(double dt) {
     if (burnTimer > 0) burnTimer -= dt;
     if (soakedTimer > 0) {
@@ -132,6 +137,7 @@ class ElementAffinityComponent {
       if (frozenTimer <= 0) isFrozen = false;
     }
     if (poisonTimer > 0) poisonTimer -= dt;
+    if (shockTimer > 0) shockTimer -= dt;
   }
 }
 

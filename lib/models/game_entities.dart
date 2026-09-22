@@ -52,32 +52,87 @@ class PixelBlock extends GameEntity {
       return;
     }
 
-    // Nếu bị đóng băng
+    // 1. Nếu bị đóng băng (Frost / Ice)
     if (elementAffinity?.isFrozen ?? false) {
-      paint.color = Colors.lightBlueAccent.withOpacity(0.9);
+      paint.color = const Color(0xFF38BDF8);
       paint.style = PaintingStyle.fill;
       canvas.drawRRect(r, paint);
-      // Viền tuyết
+      // Vẽ tinh thể hoa tuyết trắng nổi bật ở tâm khối
       paint.color = Colors.white;
       paint.style = PaintingStyle.stroke;
+      paint.strokeWidth = 1.6;
+      final cx = rect.center.dx;
+      final cy = rect.center.dy;
+      const s = 5.0;
+      canvas.drawLine(Offset(cx - s, cy), Offset(cx + s, cy), paint);
+      canvas.drawLine(Offset(cx, cy - s), Offset(cx, cy + s), paint);
+      canvas.drawLine(Offset(cx - s * 0.7, cy - s * 0.7), Offset(cx + s * 0.7, cy + s * 0.7), paint);
+      canvas.drawLine(Offset(cx - s * 0.7, cy + s * 0.7), Offset(cx + s * 0.7, cy - s * 0.7), paint);
+      // Viền băng lấp lánh
+      paint.color = Colors.cyanAccent;
       paint.strokeWidth = 1.5;
       canvas.drawRRect(r, paint);
       return;
     }
 
-    // Nếu đang bị đốt cháy
+    // 2. Nếu đang bị đốt cháy (Fire / Burn)
     if (elementAffinity?.burnTimer != null && elementAffinity!.burnTimer > 0) {
-      paint.color = Colors.deepOrangeAccent;
+      paint.color = Colors.deepOrange;
       paint.style = PaintingStyle.fill;
+      canvas.drawRRect(r, paint);
+      // Vẽ ngọn lửa bập bùng trên đỉnh khối pixel
+      paint.color = Colors.amberAccent;
+      paint.style = PaintingStyle.fill;
+      final flamePath = Path()
+        ..moveTo(rect.left + 4, rect.top + 5)
+        ..lineTo(rect.left + rect.width * 0.35, rect.top - 2)
+        ..lineTo(rect.left + rect.width * 0.5, rect.top + 4)
+        ..lineTo(rect.left + rect.width * 0.7, rect.top - 3)
+        ..lineTo(rect.right - 4, rect.top + 5)
+        ..close();
+      canvas.drawPath(flamePath, paint);
+      // Viền lửa cam rực rỡ
+      paint.color = Colors.yellowAccent;
+      paint.style = PaintingStyle.stroke;
+      paint.strokeWidth = 1.2;
       canvas.drawRRect(r, paint);
       return;
     }
 
-    // Nếu đang bị nhiễm độc
+    // 3. Nếu đang bị nhiễm độc (Poison)
     if (elementAffinity?.poisonTimer != null && elementAffinity!.poisonTimer > 0) {
-      paint.color = Colors.greenAccent.shade700;
+      paint.color = const Color(0xFF16A34A);
       paint.style = PaintingStyle.fill;
       canvas.drawRRect(r, paint);
+      // Bong bóng độc xanh lục / tím
+      paint.color = Colors.purpleAccent.withOpacity(0.8);
+      paint.style = PaintingStyle.fill;
+      canvas.drawCircle(Offset(rect.center.dx - 3, rect.center.dy - 2), 3.0, paint);
+      paint.color = Colors.greenAccent;
+      canvas.drawCircle(Offset(rect.center.dx + 4, rect.center.dy + 3), 2.2, paint);
+      // Viền độc tím
+      paint.color = Colors.purpleAccent;
+      paint.style = PaintingStyle.stroke;
+      paint.strokeWidth = 1.4;
+      canvas.drawRRect(r, paint);
+      return;
+    }
+
+    // 4. Nếu đang bị nhiễm điện / giật sét (Shock)
+    if (elementAffinity?.shockTimer != null && elementAffinity!.shockTimer > 0) {
+      paint.color = const Color(0xFFFBBF24);
+      paint.style = PaintingStyle.fill;
+      canvas.drawRRect(r, paint);
+      // Tia sét vàng zigzag trên khối
+      paint.color = Colors.white;
+      paint.style = PaintingStyle.stroke;
+      paint.strokeWidth = 1.6;
+      final path = Path()
+        ..moveTo(rect.left + 4, rect.top + 4)
+        ..lineTo(rect.center.dx + 2, rect.center.dy - 1)
+        ..lineTo(rect.center.dx - 2, rect.center.dy + 2)
+        ..lineTo(rect.right - 4, rect.bottom - 4);
+      canvas.drawPath(path, paint);
       return;
     }
 
@@ -123,6 +178,7 @@ class PlayerBall extends GameEntity {
   double radius;
   double weaponAngle = 0.0;
   double attackCooldown = 0.0;
+  double spinMultiplier = 1.0;
   final List<Offset> trail = [];
 
   PlayerBall({
@@ -149,9 +205,9 @@ class PlayerBall extends GameEntity {
     trail.insert(0, Offset(transform.x, transform.y));
     if (trail.length > 8) trail.removeLast();
 
-    // Xoay vũ khí
+    // Xoay vũ khí (nhân thêm hệ số xoay cuồng nộ)
     final speedMultiplier = race.speedMultiplier;
-    weaponAngle += (role.attackSpeed * speedMultiplier * 4.5) * dt;
+    weaponAngle += (role.attackSpeed * speedMultiplier * 4.5 * spinMultiplier) * dt;
     if (weaponAngle > 2 * pi) weaponAngle -= 2 * pi;
 
     if (attackCooldown > 0) attackCooldown -= dt;
@@ -480,3 +536,136 @@ class MistZone {
     canvas.drawCircle(center, radius, cloudPaint);
   }
 }
+
+/// Tinh Linh Hộ Vệ bay xoay quanh Quả cầu người chơi
+class OrbitingSpirit {
+  final String id;
+  ElementType element;
+  double orbitRadius;
+  double angle;
+  double orbitSpeed; // radians per second
+  Color color;
+  double size;
+  final List<Offset> trail = [];
+
+  OrbitingSpirit({
+    required this.id,
+    this.element = ElementType.fire,
+    this.orbitRadius = 52.0,
+    this.angle = 0.0,
+    this.orbitSpeed = 3.8,
+    required this.color,
+    this.size = 8.0,
+  });
+
+  void update(double dt, Offset center) {
+    angle += orbitSpeed * dt;
+    if (angle > 2 * pi) angle -= 2 * pi;
+
+    final currentPos = getPosition(center);
+    trail.insert(0, currentPos);
+    if (trail.length > 6) trail.removeLast();
+  }
+
+  Offset getPosition(Offset center) {
+    return Offset(
+      center.dx + cos(angle) * orbitRadius,
+      center.dy + sin(angle) * orbitRadius,
+    );
+  }
+
+  void draw(Canvas canvas, Paint paint, Offset center) {
+    final pos = getPosition(center);
+
+    // Vệt sáng theo sau tinh linh
+    for (int i = trail.length - 1; i >= 0; i--) {
+      final tPos = trail[i];
+      final prog = 1.0 - (i / trail.length);
+      final trailPaint = Paint()
+        ..color = color.withOpacity(prog * 0.35)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+      canvas.drawCircle(tPos, size * (0.4 + prog * 0.5), trailPaint);
+    }
+
+    // Hào quang tinh linh
+    final glowPaint = Paint()
+      ..color = color.withOpacity(0.55)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawCircle(pos, size * 1.6, glowPaint);
+
+    // Lõi tinh linh phát sáng
+    paint.color = Colors.white;
+    paint.style = PaintingStyle.fill;
+    canvas.drawCircle(pos, size * 0.6, paint);
+
+    paint.color = color;
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = 2.0;
+    canvas.drawCircle(pos, size, paint);
+  }
+}
+
+/// Tia sét điện giật ngoằn ngoèo chân thực
+class LightningArc {
+  final List<Offset> points;
+  final Color color;
+  double lifeTime;
+  final double maxLife;
+
+  LightningArc({
+    required this.points,
+    required this.color,
+    this.lifeTime = 0.16,
+  }) : maxLife = lifeTime;
+
+  bool update(double dt) {
+    lifeTime -= dt;
+    return lifeTime <= 0;
+  }
+
+  void draw(Canvas canvas, Paint paint) {
+    if (points.length < 2) return;
+    final alpha = (lifeTime / maxLife).clamp(0.0, 1.0);
+
+    // Đường hào quang sét
+    final glowPaint = Paint()
+      ..color = color.withOpacity(alpha * 0.75)
+      ..strokeWidth = 4.0
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+
+    // Đường lõi sét trắng sáng
+    final corePaint = Paint()
+      ..color = Colors.white.withOpacity(alpha)
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round;
+
+    for (int i = 0; i < points.length - 1; i++) {
+      canvas.drawLine(points[i], points[i + 1], glowPaint);
+      canvas.drawLine(points[i], points[i + 1], corePaint);
+    }
+  }
+
+  static LightningArc createZigzag(Offset start, Offset end, Color color) {
+    final List<Offset> pts = [start];
+    final dist = (end - start).distance;
+    final segments = (dist / 14.0).clamp(3, 10).toInt();
+    final rng = Random();
+
+    for (int i = 1; i < segments; i++) {
+      final t = i / segments;
+      final interp = Offset(
+        start.dx + (end.dx - start.dx) * t,
+        start.dy + (end.dy - start.dy) * t,
+      );
+      // Độ lệch zigzag vuông góc
+      final perpX = -(end.dy - start.dy) / (dist > 0 ? dist : 1);
+      final perpY = (end.dx - start.dx) / (dist > 0 ? dist : 1);
+      final offsetDist = (rng.nextDouble() - 0.5) * 16.0;
+      pts.add(Offset(interp.dx + perpX * offsetDist, interp.dy + perpY * offsetDist));
+    }
+    pts.add(end);
+    return LightningArc(points: pts, color: color);
+  }
+}
+

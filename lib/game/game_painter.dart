@@ -58,12 +58,22 @@ class GamePainter extends CustomPainter {
     // 9. Vẽ Quả cầu Nhân vật 3D (Player Ball)
     engine.player.draw(canvas, paint);
 
-    // 10. Vẽ Hạt nổ tung (Debris)
+    // 10. Vẽ Tinh Linh Hộ Vệ bay xoay quanh bóng (Orbiting Spirits)
+    for (final spirit in engine.spirits) {
+      spirit.draw(canvas, paint, engine.player.transform.position);
+    }
+
+    // 11. Vẽ Tia sét giật chuỗi chân thực (Lightning Arcs)
+    for (final arc in engine.lightningArcs) {
+      arc.draw(canvas, paint);
+    }
+
+    // 12. Vẽ Hạt nổ tung (Debris)
     for (final p in engine.debris) {
       p.draw(canvas, paint);
     }
 
-    // 11. Vẽ Chữ số sát thương & text trạng thái bay lên
+    // 13. Vẽ Chữ số sát thương & text trạng thái bay lên
     _drawFloatingTexts(canvas);
 
     canvas.restore();
@@ -110,21 +120,6 @@ class GamePainter extends CustomPainter {
     paint.color = Colors.cyanAccent.withOpacity(0.25);
     paint.strokeWidth = 6.0;
     canvas.drawRect(worldRect.inflate(2.0), paint);
-
-    // Vẽ nền sàn và viền neon cho buồng rỗng 2x2 ở tâm
-    final centerX = engine.gridStartX + gridWidth / 2;
-    final centerY = engine.gridStartY + gridHeight / 2;
-    final chamberRect = Rect.fromCenter(
-      center: Offset(centerX, centerY),
-      width: engine.gridBlockSize * 2,
-      height: engine.gridBlockSize * 2,
-    );
-
-    // Viền neon làm nổi bật buồng xuất phát ở tâm trên nền ảnh ẩn
-    paint.color = Colors.cyanAccent.withOpacity(0.7);
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 2.0;
-    canvas.drawRect(chamberRect, paint);
   }
 
   void _drawRevealedMemeLayer(Canvas canvas, Paint paint) {

@@ -142,6 +142,29 @@ class _ForgeModalState extends State<ForgeModal> {
                       if (engine.upgradeMagnet()) setState(() {});
                     },
                   ),
+                  _buildUpgradeRow(
+                    title: 'Cuồng Vũ Xoay Kiếm',
+                    subtitle: 'Vũ khí xoay nhanh hơn (+40% tốc độ xoay mỗi cấp)',
+                    level: engine.spinUpgradeLevel,
+                    cost: engine.getUpgradeCost(engine.spinUpgradeLevel),
+                    icon: Icons.cyclone,
+                    color: Colors.cyanAccent,
+                    onUpgrade: () {
+                      if (engine.upgradeSpin()) setState(() {});
+                    },
+                  ),
+                  if (engine.spirits.length < 4)
+                    _buildUpgradeRow(
+                      title: 'Thêm Tinh Linh Hộ Vệ',
+                      subtitle: 'Triệu hồi thêm 1 tinh linh nguyên tố xoay quanh bóng',
+                      level: engine.spirits.length,
+                      cost: engine.getUpgradeCost(engine.spiritUpgradeLevel) + 25,
+                      icon: Icons.auto_awesome,
+                      color: Colors.amberAccent,
+                      onUpgrade: () {
+                        if (engine.upgradeSpirit()) setState(() {});
+                      },
+                    ),
                 ],
               ),
             ),

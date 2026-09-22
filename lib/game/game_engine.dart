@@ -22,6 +22,8 @@ class GameEngine extends ChangeNotifier {
   List<FloatingText> floatingTexts = [];
   List<MistZone> mistZones = [];
   List<ShockwaveRing> shockwaves = [];
+  List<OrbitingSpirit> spirits = [];
+  List<LightningArc> lightningArcs = [];
 
   // Hiệu ứng Rung lắc màn hình (Screen Shake)
   double screenShake = 0.0;
@@ -41,12 +43,16 @@ class GameEngine extends ChangeNotifier {
   double completionPercent = 0.0;
   bool isLevelCompleted = false;
 
-  // Cấp độ nâng cấp tại Lò rèn
+  // Cấp độ nâng cấp tại Lò rèn & Thăng cấp
   int damageUpgradeLevel = 0;
   int speedUpgradeLevel = 0;
   int rangeUpgradeLevel = 0;
   int bounceUpgradeLevel = 0;
   int magnetUpgradeLevel = 0;
+  int spinUpgradeLevel = 0;
+  int spiritUpgradeLevel = 0;
+
+  double get weaponSpinSpeedMultiplier => 1.0 + (spinUpgradeLevel * 0.4);
 
   // Lực hút nam châm cơ bản
   double get magnetRange => 80.0 + (magnetUpgradeLevel * 25.0);
@@ -106,6 +112,17 @@ class GameEngine extends ChangeNotifier {
       role: role,
       race: race,
     );
+
+    // Khởi tạo 1 Tinh Linh Hộ Vệ cơ bản ban đầu đồng hành cùng người chơi
+    spirits.add(OrbitingSpirit(
+      id: 'starter_spirit',
+      element: ElementType.fire,
+      orbitRadius: 48.0,
+      angle: 0.0,
+      orbitSpeed: 3.8,
+      color: Colors.deepOrangeAccent,
+      size: 8.0,
+    ));
   }
 
   void resize(Size newSize) {
@@ -233,9 +250,9 @@ class GameEngine extends ChangeNotifier {
   void update(double dt) {
     if (isLevelCompleted) return;
 
-    // Giảm dần độ rung màn hình (Screen Shake decay)
+    // Giảm dần độ rung màn hình rất nhanh (Screen Shake decay)
     if (screenShake > 0) {
-      screenShake = max(0.0, screenShake - dt * 26.0);
+      screenShake = max(0.0, screenShake - dt * 38.0);
       final rng = Random();
       shakeOffset = Offset(
         (rng.nextDouble() - 0.5) * 2 * screenShake,
@@ -248,31 +265,57 @@ class GameEngine extends ChangeNotifier {
     // Cập nhật các vòng sóng xung kích (Shockwaves)
     shockwaves.removeWhere((sw) => sw.update(dt));
 
+    // Cập nhật các tia sét giật chuỗi (Lightning Arcs)
+    lightningArcs.removeWhere((arc) => arc.update(dt));
+
     // 1. Cập nhật Nhân vật (Vị trí & Góc vũ khí)
+    player.spinMultiplier = weaponSpinSpeedMultiplier;
     player.update(dt);
     _handleBallBorderCollision();
     _handleBallBlockCollision();
 
-    // 2. Cơ chế Vũ khí theo Role
+    // 2. Cập nhật Tinh Linh Hộ Vệ xoay quanh bóng
+    final pCenter = player.transform.position;
+    for (final spirit in spirits) {
+      spirit.update(dt, pCenter);
+      final sPos = spirit.getPosition(pCenter);
+      for (final b in blocks) {
+        if (b.health!.isDestroyed) continue;
+        if (b.transform.rect.contains(sPos)) {
+          _damageBlock(b, totalDamage * 0.8 * dt * 5.0, 'TINH LINH');
+          if (spirit.element == ElementType.fire) {
+            b.elementAffinity?.applyFire(2.5, totalDamage * 0.25);
+          } else if (spirit.element == ElementType.frost) {
+            b.elementAffinity?.applyFrost(3.0);
+          } else if (spirit.element == ElementType.lightning) {
+            b.elementAffinity?.applyShock(1.2);
+          } else if (spirit.element == ElementType.poison) {
+            b.elementAffinity?.applyPoison(3.0, totalDamage * 0.2);
+          }
+        }
+      }
+    }
+
+    // 3. Cơ chế Vũ khí theo Role
     _handleWeaponAttacks(dt);
 
-    // 3. Cập nhật Mũi tên & Móc câu
+    // 4. Cập nhật Mũi tên & Móc câu
     _updateProjectiles(dt);
 
-    // 4. Cập nhật Hiệu ứng Nguyên tố & Sương mù (Mist)
+    // 5. Cập nhật Hiệu ứng Nguyên tố & Sương mù (Mist)
     _updateMistZones(dt);
 
-    // 5. Cập nhật các khối Pixel
+    // 6. Cập nhật các khối Pixel
     for (final b in blocks) {
       if (!b.health!.isDestroyed) {
         b.update(dt);
       }
     }
 
-    // 6. Cập nhật Vật phẩm rơi & Lực hút Nam châm
+    // 7. Cập nhật Vật phẩm rơi & Lực hút Nam châm
     _updateDrops(dt);
 
-    // 7. Cập nhật Hạt vỡ & Chữ bay
+    // 8. Cập nhật Hạt vỡ & Chữ bay
     debris.removeWhere((p) => p.update(dt));
     floatingTexts.removeWhere((t) => t.update(dt));
 
@@ -561,6 +604,29 @@ class GameEngine extends ChangeNotifier {
       block.elementAffinity?.applyWater(4.0);
     }
 
+    // Áp dụng các Nguyên Tố Cơ Bản mà người chơi sở hữu
+    if (ownedElements.contains(ElementType.fire)) {
+      block.elementAffinity?.applyFire(3.2, totalDamage * 0.35);
+      if (Random().nextDouble() < 0.20) {
+        _triggerFireBurst(block);
+      }
+    }
+    if (ownedElements.contains(ElementType.frost)) {
+      block.elementAffinity?.applyFrost(4.0);
+    }
+    if (ownedElements.contains(ElementType.poison)) {
+      block.elementAffinity?.applyPoison(4.5, totalDamage * 0.25);
+    }
+    if (ownedElements.contains(ElementType.water)) {
+      block.elementAffinity?.applyWater(5.0);
+    }
+    if (ownedElements.contains(ElementType.lightning)) {
+      block.elementAffinity?.applyShock(1.5);
+      if (Random().nextDouble() < 0.30) {
+        _triggerLightningBolt(block);
+      }
+    }
+
     // Nếu khối đang bị đóng băng (Frozen): Nhận thêm 50% sát thương
     if (block.elementAffinity?.isFrozen ?? false) {
       dmg *= 1.5;
@@ -577,9 +643,9 @@ class GameEngine extends ChangeNotifier {
       _triggerChainLightning(block);
     }
 
-    // Chớp sáng trắng khi bị đánh trúng & Rung nhẹ & Âm thanh va chạm
+    // Chớp sáng trắng khi bị đánh trúng & Rung cực nhẹ (tinh tế, không gây nhức mắt)
     block.hitFlashTimer = 0.08;
-    screenShake = max(screenShake, 3.2);
+    screenShake = max(screenShake, 0.5);
     AudioService.playHit();
 
     final justDestroyed = block.health!.takeDamage(dmg);
@@ -589,12 +655,62 @@ class GameEngine extends ChangeNotifier {
     }
   }
 
+  void _triggerFireBurst(PixelBlock origin) {
+    floatingTexts.add(FloatingText(
+      text: '🔥 HỎA NỔ!',
+      x: origin.transform.x,
+      y: origin.transform.y - 12,
+      color: Colors.deepOrangeAccent,
+    ));
+    for (final b in blocks) {
+      if (b == origin || b.health!.isDestroyed) continue;
+      if ((b.transform.position - origin.transform.position).distance < 60) {
+        b.health!.takeDamage(totalDamage * 0.5);
+        b.elementAffinity?.applyFire(2.5, totalDamage * 0.25);
+      }
+    }
+  }
+
+  void _triggerLightningBolt(PixelBlock target) {
+    AudioService.playLightning();
+    lightningArcs.add(LightningArc.createZigzag(
+      player.transform.position,
+      target.transform.position,
+      Colors.amberAccent,
+    ));
+    floatingTexts.add(FloatingText(
+      text: '⚡ LÔI ĐIỆN!',
+      x: target.transform.x,
+      y: target.transform.y - 10,
+      color: Colors.amberAccent,
+    ));
+    // Sét lan sang 1 khối lân cận
+    for (final b in blocks) {
+      if (b == target || b.health!.isDestroyed) continue;
+      if ((b.transform.position - target.transform.position).distance < 75) {
+        lightningArcs.add(LightningArc.createZigzag(
+          target.transform.position,
+          b.transform.position,
+          Colors.yellowAccent,
+        ));
+        b.health!.takeDamage(totalDamage * 0.7);
+        b.elementAffinity?.applyShock(1.5);
+        break;
+      }
+    }
+  }
+
   void _triggerChainLightning(PixelBlock origin) {
     int chainCount = 0;
     AudioService.playLightning();
     for (final b in blocks) {
       if (b == origin || b.health!.isDestroyed) continue;
       if ((b.transform.position - origin.transform.position).distance < 75) {
+        lightningArcs.add(LightningArc.createZigzag(
+          origin.transform.position,
+          b.transform.position,
+          Colors.yellowAccent,
+        ));
         b.health!.takeDamage(totalDamage * 0.9);
         floatingTexts.add(FloatingText(
           text: '⚡ SÉT!',
@@ -612,8 +728,8 @@ class GameEngine extends ChangeNotifier {
     brokenBlocksCount++;
     completionPercent = (brokenBlocksCount / totalBlocksCount).clamp(0.0, 1.0);
 
-    // Kích hoạt Rung giật màn hình mạnh & Sóng xung kích & Âm thanh nổ vỡ
-    screenShake = max(screenShake, 9.0);
+    // Kích hoạt Rung giật màn hình vừa vặn (2.5px), sóng xung kích và âm thanh nổ vỡ
+    screenShake = max(screenShake, 2.5);
     AudioService.playBlockBreak();
     shockwaves.add(ShockwaveRing(
       center: block.transform.position,
@@ -757,6 +873,61 @@ class GameEngine extends ChangeNotifier {
   // Thêm nguyên tố mới khi lên cấp
   void addElement(ElementType element) {
     ownedElements.add(element);
+    // Tự động triệu hồi thêm tinh linh theo hệ nguyên tố đó nếu chưa đủ 4 tinh linh
+    if (spirits.length < 4) {
+      summonSpirit(element);
+    }
+    notifyListeners();
+  }
+
+  void upgradeSpinSpeed() {
+    spinUpgradeLevel++;
+    player.spinMultiplier = weaponSpinSpeedMultiplier;
+    floatingTexts.add(FloatingText(
+      text: '🌀 CUỒNG VŨ XOAY!',
+      x: player.transform.x,
+      y: player.transform.y - 15,
+      color: Colors.cyanAccent,
+    ));
+    notifyListeners();
+  }
+
+  void summonSpirit([ElementType? el]) {
+    spiritUpgradeLevel++;
+    final elementList = [
+      ElementType.fire,
+      ElementType.frost,
+      ElementType.lightning,
+      ElementType.wind,
+      ElementType.poison,
+    ];
+    final spiritEl = el ?? elementList[(spirits.length) % elementList.length];
+    final colors = {
+      ElementType.fire: Colors.deepOrangeAccent,
+      ElementType.frost: Colors.cyanAccent,
+      ElementType.lightning: Colors.amberAccent,
+      ElementType.wind: Colors.tealAccent,
+      ElementType.poison: Colors.lightGreenAccent,
+    };
+
+    spirits.add(OrbitingSpirit(
+      id: 'spirit_${DateTime.now().millisecondsSinceEpoch}',
+      element: spiritEl,
+      orbitRadius: 46.0 + spirits.length * 6.0,
+      angle: 0.0,
+      orbitSpeed: 3.6 + spirits.length * 0.4,
+      color: colors[spiritEl] ?? Colors.cyanAccent,
+    ));
+    // Chia đều góc xoay quanh quả cầu
+    for (int i = 0; i < spirits.length; i++) {
+      spirits[i].angle = i * (2 * pi / spirits.length);
+    }
+    floatingTexts.add(FloatingText(
+      text: '🧚 THÊM TINH LINH!',
+      x: player.transform.x,
+      y: player.transform.y - 20,
+      color: Colors.amberAccent,
+    ));
     notifyListeners();
   }
 
@@ -831,6 +1002,26 @@ class GameEngine extends ChangeNotifier {
       gold -= cost;
       magnetUpgradeLevel++;
       notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  bool upgradeSpin() {
+    final cost = getUpgradeCost(spinUpgradeLevel);
+    if (gold >= cost) {
+      gold -= cost;
+      upgradeSpinSpeed();
+      return true;
+    }
+    return false;
+  }
+
+  bool upgradeSpirit() {
+    final cost = getUpgradeCost(spiritUpgradeLevel) + 25;
+    if (gold >= cost && spirits.length < 4) {
+      gold -= cost;
+      summonSpirit();
       return true;
     }
     return false;
