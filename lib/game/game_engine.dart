@@ -105,12 +105,15 @@ class GameEngine extends ChangeNotifier {
   void resize(Size newSize) {
     if (arenaSize == newSize) return;
     final isFirstSetup = blocks.isEmpty;
+    final oldWidth = level.cols * gridBlockSize;
+    final oldHeight = level.rows * gridBlockSize;
+    final oldCenter = Offset(gridStartX + oldWidth / 2, gridStartY + oldHeight / 2);
     arenaSize = newSize;
 
     if (isFirstSetup) {
       _buildPixelGrid();
     } else {
-      // Điều chỉnh lại vị trí grid khi thay đổi kích thước mà không reset màn chơi
+      // Điều chỉnh lại vị trí grid khi thay đổi kích thước mà vẫn giữ nguyên vị trí bóng trong không gian
       final cols = level.cols;
       final rows = level.rows;
       const padding = 16.0;
@@ -119,12 +122,17 @@ class GameEngine extends ChangeNotifier {
       final availableHeight = (arenaSize.height - topOffset - 65.0).clamp(100.0, 2000.0);
       final blockSizeByWidth = availableWidth / cols;
       final blockSizeByHeight = availableHeight / rows;
-      final blockSize = min(blockSizeByWidth, blockSizeByHeight).clamp(18.0, 36.0);
+      final blockSize = min(blockSizeByWidth, blockSizeByHeight).clamp(20.0, 48.0);
       gridBlockSize = blockSize;
       final gridWidth = cols * blockSize;
       final gridHeight = rows * blockSize;
       gridStartX = (arenaSize.width - gridWidth) / 2;
       gridStartY = topOffset + (availableHeight - gridHeight) / 2;
+
+      final newCenter = Offset(gridStartX + gridWidth / 2, gridStartY + gridHeight / 2);
+      final offsetFromCenter = player.transform.position - oldCenter;
+      player.transform.position = newCenter + offsetFromCenter;
+      player.radius = (blockSize * 0.38).clamp(9.0, 15.0);
 
       for (final block in blocks) {
         block.transform.x = gridStartX + block.col * blockSize + blockSize / 2;
@@ -148,7 +156,7 @@ class GameEngine extends ChangeNotifier {
 
     final blockSizeByWidth = availableWidth / cols;
     final blockSizeByHeight = availableHeight / rows;
-    final blockSize = min(blockSizeByWidth, blockSizeByHeight).clamp(18.0, 36.0);
+    final blockSize = min(blockSizeByWidth, blockSizeByHeight).clamp(20.0, 48.0);
     gridBlockSize = blockSize;
 
     final gridWidth = cols * blockSize;
@@ -156,14 +164,18 @@ class GameEngine extends ChangeNotifier {
     gridStartX = (arenaSize.width - gridWidth) / 2;
     gridStartY = topOffset + (availableHeight - gridHeight) / 2;
 
-    // Đặt vị trí Quả cầu xuất phát chính xác tại TÂM của thế giới pixel
+    // Đặt vị trí Quả cầu xuất phát chính xác tại TÂM của buồng rỗng 2x2
     final gridCenterX = gridStartX + gridWidth / 2;
     final gridCenterY = gridStartY + gridHeight / 2;
     player.transform.x = gridCenterX;
     player.transform.y = gridCenterY;
+    player.radius = (blockSize * 0.38).clamp(9.0, 15.0);
 
-    final centerCol = (cols - 1) / 2.0;
-    final centerRow = (rows - 1) / 2.0;
+    // Xác định 4 ô trống trung tâm (như ví dụ 2:2, 2:3, 3:2, 3:3)
+    final centerCol1 = cols ~/ 2 - 1;
+    final centerCol2 = cols ~/ 2;
+    final centerRow1 = rows ~/ 2 - 1;
+    final centerRow2 = rows ~/ 2;
 
     int breakableCount = 0;
 
@@ -173,8 +185,9 @@ class GameEngine extends ChangeNotifier {
         final bx = gridStartX + c * blockSize + blockSize / 2;
         final by = gridStartY + r * blockSize + blockSize / 2;
 
-        // Buồng khởi đầu 4x4 ở tâm
-        final isCenterChamber = (r - centerRow).abs() <= 1.5 && (c - centerCol).abs() <= 1.5;
+        // Các ô trống ban đầu tạo nên không gian rỗng để bóng nảy va vào tường bao quanh
+        final isCenterEmpty = (r == centerRow1 || r == centerRow2) &&
+                              (c == centerCol1 || c == centerCol2);
 
         final block = PixelBlock(
           id: 'block_${r}_$c',
@@ -184,7 +197,7 @@ class GameEngine extends ChangeNotifier {
             width: blockSize,
             height: blockSize,
           ),
-          health: HealthComponent(maxHp: 25.0 + (level.id - 1) * 15.0),
+          health: HealthComponent(maxHp: 20.0 + (level.id - 1) * 12.0),
           elementAffinity: ElementAffinityComponent(),
           render: RenderComponent(primaryColor: const Color(0xFF4A5568)),
           col: c,
@@ -192,8 +205,8 @@ class GameEngine extends ChangeNotifier {
           memeColor: memeColor,
         );
 
-        if (isCenterChamber) {
-          // Khối trung tâm đã được khai mở sẵn làm buồng nảy ban đầu
+        if (isCenterEmpty) {
+          // Các ô trống ban đầu được mở sẵn làm không gian xuất phát
           block.health!.currentHp = 0;
           block.health!.isDestroyed = true;
           block.isRevealed = true;
@@ -282,30 +295,42 @@ class GameEngine extends ChangeNotifier {
       final distSq = dx * dx + dy * dy;
 
       if (distSq < r * r) {
-        // Có va chạm! Phản xạ vận tốc
-        if (dx.abs() > dy.abs()) {
-          pt.vx = dx > 0 ? pt.vx.abs() : -pt.vx.abs();
+        // Có va chạm với khối block tường!
+        final overlapX = (r - dx.abs()).clamp(0.0, r);
+        final overlapY = (r - dy.abs()).clamp(0.0, r);
+
+        if (overlapX < overlapY) {
+          // Va chạm theo phương ngang (Trái hoặc Phải)
+          if (dx < 0) {
+            // Bóng ở bên trái khối, đập vào mặt trái -> nảy sang trái
+            pt.vx = -pt.vx.abs();
+            pt.x = rect.left - r - 0.1;
+          } else {
+            // Bóng ở bên phải khối, đập vào mặt phải -> nảy sang phải
+            pt.vx = pt.vx.abs();
+            pt.x = rect.right + r + 0.1;
+          }
         } else {
-          pt.vy = dy > 0 ? pt.vy.abs() : -pt.vy.abs();
+          // Va chạm theo phương dọc (Trên hoặc Dưới)
+          if (dy < 0) {
+            // Bóng ở phía trên khối, đập vào mặt trên -> nảy lên trên
+            pt.vy = -pt.vy.abs();
+            pt.y = rect.top - r - 0.1;
+          } else {
+            // Bóng ở phía dưới khối, đập vào mặt dưới -> nảy xuống dưới
+            pt.vy = pt.vy.abs();
+            pt.y = rect.bottom + r + 0.1;
+          }
         }
 
-        // Đẩy quả bóng ra khỏi vật cản để tránh kẹt
-        final dist = sqrt(distSq);
-        final overlap = r - (dist > 0 ? dist : 0.001);
-        if (dist > 0) {
-          pt.x += (dx / dist) * overlap;
-          pt.y += (dy / dist) * overlap;
-        }
-
-        // Gây sát thương va chạm (Orc gây nhiều dame hơn)
-        double collisionDmg = totalDamage * 0.75;
-        // Nếu là Tộc Yeti: Frost Aura làm đông cứng khối
+        // Gây sát thương va chạm
+        double collisionDmg = totalDamage * 0.8;
         if (race.type == RaceType.yeti) {
           block.elementAffinity?.applyFrost(3.0);
           collisionDmg *= 1.35;
         }
         _damageBlock(block, collisionDmg, 'VA CHẠM');
-        break; // Mỗi frame chỉ xử lý 1 va chạm chính
+        break; // Mỗi frame xử lý 1 va chạm chính
       }
     }
   }
