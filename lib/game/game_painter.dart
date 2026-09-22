@@ -125,15 +125,9 @@ class GamePainter extends CustomPainter {
   void _drawRevealedMemeLayer(Canvas canvas, Paint paint) {
     for (final block in engine.blocks) {
       if (block.health!.isDestroyed) {
-        final rect = block.transform.rect.deflate(1.0);
+        final rect = block.transform.rect;
         paint.color = block.memeColor;
         paint.style = PaintingStyle.fill;
-        canvas.drawRect(rect, paint);
-
-        // Hiệu ứng sáng viền nhẹ cho tranh pixel meme
-        paint.color = Colors.white.withOpacity(0.08);
-        paint.style = PaintingStyle.stroke;
-        paint.strokeWidth = 0.8;
         canvas.drawRect(rect, paint);
       }
     }

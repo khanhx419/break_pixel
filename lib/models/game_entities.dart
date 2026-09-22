@@ -136,25 +136,27 @@ class PixelBlock extends GameEntity {
       return;
     }
 
-    // Màu thường: Gạch bảo vệ có màu đá/kim loại cứng cáp
+    // Màu của khối gạch bảo vệ chưa vỡ (Lớp vỏ che giấu bức tranh meme bên dưới)
     final hpPct = health?.hpPercent ?? 1.0;
-    // Khi bị nứt/mất máu thì hơi chuyển dần sang màu của meme bên dưới
-    final displayColor = Color.lerp(memeColor, const Color(0xFF333A42), hpPct * 0.75 + 0.25)!;
-
-    paint.color = displayColor;
+    paint.color = const Color(0xFF2C3545); // Màu xám thép khối đặc trưng
     paint.style = PaintingStyle.fill;
     canvas.drawRRect(r, paint);
 
-    // Viền khối pixel đậm chất retro
-    paint.color = Colors.white.withOpacity(0.18);
+    // Gờ viền 3D nổi của khối gạch pixel
     paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 1.0;
-    canvas.drawRRect(r, paint);
+    paint.strokeWidth = 1.2;
+    paint.color = const Color(0xFF475569); // Cạnh trên & trái sáng
+    canvas.drawLine(Offset(rect.left + 2, rect.bottom - 2), Offset(rect.left + 2, rect.top + 2), paint);
+    canvas.drawLine(Offset(rect.left + 2, rect.top + 2), Offset(rect.right - 2, rect.top + 2), paint);
 
-    // Vẽ vết nứt nếu mất hơn 30% máu
-    if (hpPct < 0.7) {
-      paint.color = Colors.black.withOpacity(0.35);
-      paint.strokeWidth = 1.2;
+    paint.color = const Color(0xFF1E2633); // Cạnh dưới & phải tối
+    canvas.drawLine(Offset(rect.right - 2, rect.top + 2), Offset(rect.right - 2, rect.bottom - 2), paint);
+    canvas.drawLine(Offset(rect.left + 2, rect.bottom - 2), Offset(rect.right - 2, rect.bottom - 2), paint);
+
+    // Vẽ vết nứt vỡ khi bị mất máu
+    if (hpPct < 0.75) {
+      paint.color = Colors.black.withOpacity(0.55);
+      paint.strokeWidth = 1.4;
       canvas.drawLine(
         Offset(rect.left + 5, rect.top + 5),
         Offset(rect.center.dx, rect.center.dy),

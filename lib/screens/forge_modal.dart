@@ -155,12 +155,12 @@ class _ForgeModalState extends State<ForgeModal> {
                   ),
                   if (engine.spirits.length < 4)
                     _buildUpgradeRow(
-                      title: 'Thêm Tinh Linh Hộ Vệ',
-                      subtitle: 'Triệu hồi thêm 1 tinh linh nguyên tố xoay quanh bóng',
+                      title: 'Cầu Vệ Tinh Xoay Quanh',
+                      subtitle: 'Thêm 1 quả cầu bay xoay quanh tự động phá nát gạch',
                       level: engine.spirits.length,
                       cost: engine.getUpgradeCost(engine.spiritUpgradeLevel) + 25,
-                      icon: Icons.auto_awesome,
-                      color: Colors.amberAccent,
+                      icon: Icons.blur_circular,
+                      color: Colors.cyanAccent,
                       onUpgrade: () {
                         if (engine.upgradeSpirit()) setState(() {});
                       },

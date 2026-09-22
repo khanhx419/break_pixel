@@ -60,10 +60,10 @@ class LevelUpModal extends StatelessWidget {
       if (engine.spirits.length < 4)
         LevelUpOption(
           kind: ChoiceKind.spirit,
-          title: '🧚 Triệu Hồi Tinh Linh Hộ Vệ',
-          description: 'Gọi 1 tiểu tinh linh bay xoay quanh bóng, tự động húc và thiêu đốt/đóng băng các khối pixel.',
-          icon: Icons.auto_awesome,
-          color: Colors.amberAccent,
+          title: '🔮 Cầu Vệ Tinh Xoay Quanh (+1 Cầu Hộ Vệ)',
+          description: 'Thêm 1 quả cầu năng lượng bay xoay quanh bóng, tự động va đập và phá nát các khối pixel.',
+          icon: Icons.blur_circular,
+          color: Colors.cyanAccent,
         ),
       LevelUpOption(
         kind: ChoiceKind.spin,

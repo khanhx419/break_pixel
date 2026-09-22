@@ -112,17 +112,6 @@ class GameEngine extends ChangeNotifier {
       role: role,
       race: race,
     );
-
-    // Khởi tạo 1 Tinh Linh Hộ Vệ cơ bản ban đầu đồng hành cùng người chơi
-    spirits.add(OrbitingSpirit(
-      id: 'starter_spirit',
-      element: ElementType.fire,
-      orbitRadius: 48.0,
-      angle: 0.0,
-      orbitSpeed: 3.8,
-      color: Colors.deepOrangeAccent,
-      size: 8.0,
-    ));
   }
 
   void resize(Size newSize) {
@@ -873,10 +862,6 @@ class GameEngine extends ChangeNotifier {
   // Thêm nguyên tố mới khi lên cấp
   void addElement(ElementType element) {
     ownedElements.add(element);
-    // Tự động triệu hồi thêm tinh linh theo hệ nguyên tố đó nếu chưa đủ 4 tinh linh
-    if (spirits.length < 4) {
-      summonSpirit(element);
-    }
     notifyListeners();
   }
 
@@ -894,39 +879,31 @@ class GameEngine extends ChangeNotifier {
 
   void summonSpirit([ElementType? el]) {
     spiritUpgradeLevel++;
-    final elementList = [
-      ElementType.fire,
-      ElementType.frost,
-      ElementType.lightning,
-      ElementType.wind,
-      ElementType.poison,
+    final colors = [
+      Colors.cyanAccent,
+      Colors.amberAccent,
+      Colors.deepOrangeAccent,
+      Colors.purpleAccent,
     ];
-    final spiritEl = el ?? elementList[(spirits.length) % elementList.length];
-    final colors = {
-      ElementType.fire: Colors.deepOrangeAccent,
-      ElementType.frost: Colors.cyanAccent,
-      ElementType.lightning: Colors.amberAccent,
-      ElementType.wind: Colors.tealAccent,
-      ElementType.poison: Colors.lightGreenAccent,
-    };
+    final orbColor = colors[(spirits.length) % colors.length];
 
     spirits.add(OrbitingSpirit(
       id: 'spirit_${DateTime.now().millisecondsSinceEpoch}',
-      element: spiritEl,
-      orbitRadius: 46.0 + spirits.length * 6.0,
+      element: el ?? ElementType.none,
+      orbitRadius: 48.0 + spirits.length * 6.0,
       angle: 0.0,
-      orbitSpeed: 3.6 + spirits.length * 0.4,
-      color: colors[spiritEl] ?? Colors.cyanAccent,
+      orbitSpeed: 3.8 + spirits.length * 0.4,
+      color: orbColor,
     ));
     // Chia đều góc xoay quanh quả cầu
     for (int i = 0; i < spirits.length; i++) {
       spirits[i].angle = i * (2 * pi / spirits.length);
     }
     floatingTexts.add(FloatingText(
-      text: '🧚 THÊM TINH LINH!',
+      text: '🔮 THÊM CẦU VỆ TINH!',
       x: player.transform.x,
       y: player.transform.y - 20,
-      color: Colors.amberAccent,
+      color: Colors.cyanAccent,
     ));
     notifyListeners();
   }
