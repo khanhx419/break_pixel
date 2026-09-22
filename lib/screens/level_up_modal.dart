@@ -1,8 +1,27 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../game/game_engine.dart';
-import '../models/ecs.dart';
 import '../models/element.dart';
+
+enum ChoiceKind { element, damage, speed, magnet, gold }
+
+class LevelUpOption {
+  final ChoiceKind kind;
+  final ElementData? element;
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color color;
+
+  LevelUpOption({
+    required this.kind,
+    this.element,
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.color,
+  });
+}
 
 class LevelUpModal extends StatelessWidget {
   final GameEngine engine;
@@ -14,15 +33,95 @@ class LevelUpModal extends StatelessWidget {
     required this.onOptionSelected,
   });
 
-  List<ElementData> _getRandomOptions() {
-    final pool = List<ElementData>.from(ElementData.baseElements);
-    pool.shuffle(Random());
-    return pool.take(3).toList();
+  List<LevelUpOption> _getChoices() {
+    final rng = Random();
+    final List<LevelUpOption> choices = [];
+
+    // 1. Lọc ra danh sách các nguyên tố CHƯA SỞ HỮU (loại bỏ hoàn toàn các nguyên tố đã có)
+    final unownedElements = ElementData.baseElements
+        .where((e) => !engine.ownedElements.contains(e.type))
+        .toList();
+    unownedElements.shuffle(rng);
+
+    // Lấy tối đa 3 nguyên tố chưa sở hữu
+    for (final el in unownedElements.take(3)) {
+      choices.add(LevelUpOption(
+        kind: ChoiceKind.element,
+        element: el,
+        title: el.name,
+        description: el.description,
+        icon: el.icon,
+        color: el.color,
+      ));
+    }
+
+    // 2. Danh sách các thẻ Cường Hóa Chỉ Số dự phòng (khi thiếu nguyên tố mới hoặc đã sở hữu hết)
+    final List<LevelUpOption> statOptions = [
+      LevelUpOption(
+        kind: ChoiceKind.damage,
+        title: 'Cường Hóa Sát Thương (+25%)',
+        description: 'Tăng mạnh uy lực cho đòn đánh, vũ khí xoay và các mũi tên.',
+        icon: Icons.colorize,
+        color: Colors.redAccent,
+      ),
+      LevelUpOption(
+        kind: ChoiceKind.speed,
+        title: 'Tăng Tốc Đánh & Xoay (+20%)',
+        description: 'Vũ khí xoay nhanh hơn, nhịp bắn và vung liềm dày hơn đáng kể.',
+        icon: Icons.speed,
+        color: Colors.tealAccent,
+      ),
+      LevelUpOption(
+        kind: ChoiceKind.magnet,
+        title: 'Bão Từ Nam Châm (+40%)',
+        description: 'Tự động hút Vàng và Ngọc EXP từ khoảng cách xa trên toàn sàn.',
+        icon: Icons.all_out,
+        color: Colors.purpleAccent,
+      ),
+      LevelUpOption(
+        kind: ChoiceKind.gold,
+        title: 'Túi Vàng Khổng Lồ (+150 G)',
+        description: 'Nhận ngay 150 Vàng để nâng cấp vũ khí tại Lò Rèn.',
+        icon: Icons.monetization_on,
+        color: Colors.amberAccent,
+      ),
+    ];
+    statOptions.shuffle(rng);
+
+    // 3. Nếu chưa đủ 3 lựa chọn, bù đắp bằng các thẻ nâng cấp chỉ số
+    for (final stat in statOptions) {
+      if (choices.length >= 3) break;
+      choices.add(stat);
+    }
+
+    return choices;
+  }
+
+  void _applyChoice(LevelUpOption choice) {
+    switch (choice.kind) {
+      case ChoiceKind.element:
+        if (choice.element != null) {
+          engine.addElement(choice.element!.type);
+        }
+        break;
+      case ChoiceKind.damage:
+        engine.damageUpgradeLevel += 2;
+        break;
+      case ChoiceKind.speed:
+        engine.speedUpgradeLevel += 2;
+        break;
+      case ChoiceKind.magnet:
+        engine.magnetUpgradeLevel += 2;
+        break;
+      case ChoiceKind.gold:
+        engine.gold += 150;
+        break;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final options = _getRandomOptions();
+    final options = _getChoices();
 
     return WillPopScope(
       onWillPop: () async => false, // Bắt buộc phải chọn 1 thẻ
@@ -36,7 +135,7 @@ class LevelUpModal extends StatelessWidget {
             border: Border.all(color: Colors.amberAccent, width: 2),
             boxShadow: [
               BoxShadow(
-                color: Colors.amberAccent.withOpacity(0.3),
+                color: Colors.amberAccent.withOpacity(0.35),
                 blurRadius: 25,
                 spreadRadius: 4,
               ),
@@ -64,19 +163,18 @@ class LevelUpModal extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Nhân vật đạt Cấp ${engine.characterLevel}! Hãy chọn 1 Nguyên Tố:',
+                'Nhân vật đạt Cấp ${engine.characterLevel}! Hãy chọn 1 Kỹ Năng mới:',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
               const SizedBox(height: 20),
 
-              // 3 Thẻ lựa chọn
+              // 3 Thẻ lựa chọn mới (hoàn toàn không trùng thẻ đã sở hữu)
               Column(
-                children: options.map((data) {
-                  final isAlreadyOwned = engine.ownedElements.contains(data.type);
+                children: options.map((opt) {
                   return InkWell(
                     onTap: () {
-                      engine.addElement(data.type);
+                      _applyChoice(opt);
                       onOptionSelected();
                       Navigator.of(context).pop();
                     },
@@ -84,19 +182,19 @@ class LevelUpModal extends StatelessWidget {
                       margin: const EdgeInsets.only(bottom: 12),
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: data.color.withOpacity(0.12),
+                        color: opt.color.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: data.color, width: 1.5),
+                        border: Border.all(color: opt.color, width: 1.5),
                       ),
                       child: Row(
                         children: [
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: data.color.withOpacity(0.25),
+                              color: opt.color.withOpacity(0.25),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Icon(data.icon, color: data.color, size: 28),
+                            child: Icon(opt.icon, color: opt.color, size: 28),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -105,38 +203,43 @@ class LevelUpModal extends StatelessWidget {
                               children: [
                                 Row(
                                   children: [
-                                    Text(
-                                      data.name,
-                                      style: TextStyle(
-                                        color: data.color,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15,
+                                    Expanded(
+                                      child: Text(
+                                        opt.title,
+                                        style: TextStyle(
+                                          color: opt.color,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
                                       ),
                                     ),
-                                    if (isAlreadyOwned) ...[
-                                      const SizedBox(width: 6),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.green.withOpacity(0.3),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: const Text(
-                                          'ĐÃ SỞ HỮU',
-                                          style: TextStyle(
-                                            color: Colors.greenAccent,
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.bold,
-                                          ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: opt.kind == ChoiceKind.element
+                                            ? Colors.purple.withOpacity(0.4)
+                                            : Colors.blue.withOpacity(0.4),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        opt.kind == ChoiceKind.element
+                                            ? 'NGUYÊN TỐ MỚI'
+                                            : 'CƯỜNG HÓA',
+                                        style: TextStyle(
+                                          color: opt.kind == ChoiceKind.element
+                                              ? Colors.purpleAccent
+                                              : Colors.lightBlueAccent,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
                                         ),
                                       ),
-                                    ],
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  data.description,
+                                  opt.description,
                                   style: const TextStyle(
                                     color: Colors.white70,
                                     fontSize: 11,
