@@ -8,6 +8,7 @@ import '../models/element.dart';
 import '../models/pixel_art_data.dart';
 import '../models/game_entities.dart';
 import '../core/audio_service.dart';
+import '../core/bounded_list.dart';
 
 class GameEngine extends ChangeNotifier {
   late PlayerBall player;
@@ -17,16 +18,40 @@ class GameEngine extends ChangeNotifier {
   Size arenaSize = const Size(400, 600);
 
   List<PixelBlock> blocks = [];
-  List<ArrowEntity> arrows = [];
-  List<HookEntity> hooks = [];
+  static const maxDebris = 160;
+  static const maxLightningArcs = 24;
+  static const maxShockwaves = 16;
+  static const maxFloatingTexts = 12;
+  static const maxDrops = 160;
+  static const maxChainTargets = 24;
+
+  final bool isEndless;
+  int endlessWave = 1;
+  double elapsedTime = 0;
+  double _waveWait = 0;
+  double _cameraSettle = 0;
+  bool get isExpanding => isEndless && isLevelCompleted;
+  double get cameraScale => 1 + _cameraSettle * 0.06;
+  final ValueNotifier<int> hudRevision = ValueNotifier(0);
+  double _hudTimer = 0;
+  final Random _random = Random();
+  double _hitSoundCooldown = 0;
+  double _breakSoundCooldown = 0;
+  double _coinSoundCooldown = 0;
+  double _fusionCooldown = 0;
+  int _particlesThisFrame = 0;
+  int _breakRingsThisFrame = 0;
+
+  final List<ArrowEntity> arrows = BoundedList(24);
+  final List<HookEntity> hooks = BoundedList(8);
   List<DropItem> drops = [];
-  List<PixelDebris> debris = [];
-  List<FloatingText> floatingTexts = [];
-  List<MistZone> mistZones = [];
-  final List<VoidVortexZone> vortexZones = [];
-  List<ShockwaveRing> shockwaves = [];
+  final List<PixelDebris> debris = BoundedList(maxDebris);
+  final List<FloatingText> floatingTexts = BoundedList(maxFloatingTexts);
+  final List<MistZone> mistZones = BoundedList(3);
+  final List<VoidVortexZone> vortexZones = BoundedList(2);
+  final List<ShockwaveRing> shockwaves = BoundedList(maxShockwaves);
   List<OrbitingSpirit> spirits = [];
-  List<LightningArc> lightningArcs = [];
+  final List<LightningArc> lightningArcs = BoundedList(maxLightningArcs);
 
   // Hiệu ứng Rung lắc màn hình (Screen Shake)
   double screenShake = 0.0;
@@ -82,7 +107,7 @@ class GameEngine extends ChangeNotifier {
   double get totalDamage {
     final base =
         (role.baseDamage + damageUpgradeLevel * 4.0) * race.damageMultiplier;
-    return base;
+    return base * (isEndless ? 1 + log(endlessWave) * 0.18 : 1);
   }
 
   // Tốc độ đánh tổng thể
@@ -102,7 +127,13 @@ class GameEngine extends ChangeNotifier {
   VoidCallback? onVictory;
   VoidCallback? onBlockDestroyedEffect;
 
-  GameEngine({required this.role, required this.race, required this.level}) {
+  GameEngine({
+    required this.role,
+    required this.race,
+    required this.level,
+    this.isEndless = false,
+  }) {
+    if (isEndless) level = MemeLevel.endlessWave(endlessWave);
     _initEngine();
   }
 
@@ -115,7 +146,7 @@ class GameEngine extends ChangeNotifier {
   void _initEngine() {
     // Tốc độ nảy cơ bản
     double speed = 160.0 * (1.0 + race.bounceBonus + bounceUpgradeLevel * 0.1);
-    final randomAngle = Random().nextDouble() * 2 * pi; // Bất kỳ góc nào 360 độ
+    final randomAngle = _random.nextDouble() * 2 * pi; // Bất kỳ góc nào 360 độ
     final vx = speed * cos(randomAngle);
     final vy = speed * sin(randomAngle);
 
@@ -134,7 +165,7 @@ class GameEngine extends ChangeNotifier {
     );
   }
 
-  void resize(Size newSize) {
+  void resize(Size newSize, {bool notify = true}) {
     if (arenaSize == newSize && isGridBuilt) return;
     final isFirstSetup = !isGridBuilt;
     final oldWidth = level.cols * gridBlockSize;
@@ -178,7 +209,9 @@ class GameEngine extends ChangeNotifier {
       final offsetFromCenter = player.transform.position - oldCenter;
       player.transform.position =
           newCenter + offsetFromCenter * (gridWidth / oldWidth);
-      player.radius = blockSize * 0.32;
+      player.radius =
+          blockSize *
+          (isEndless ? min(0.48, 0.32 + (endlessWave - 1) * 0.015) : 0.32);
 
       for (final block in blocks) {
         block.transform.x = gridStartX + block.col * blockSize + blockSize / 2;
@@ -187,7 +220,7 @@ class GameEngine extends ChangeNotifier {
         block.transform.height = blockSize;
       }
     }
-    notifyListeners();
+    if (notify) notifyListeners();
   }
 
   void _buildPixelGrid() {
@@ -218,7 +251,9 @@ class GameEngine extends ChangeNotifier {
     final gridCenterY = gridStartY + gridHeight / 2;
     player.transform.x = gridCenterX;
     player.transform.y = gridCenterY;
-    player.radius = blockSize * 0.32;
+    player.radius =
+        blockSize *
+        (isEndless ? min(0.48, 0.32 + (endlessWave - 1) * 0.015) : 0.32);
 
     // Xác định 4 ô trống trung tâm (như ví dụ 2:2, 2:3, 3:2, 3:3)
     final centerCol1 = cols ~/ 2 - 1;
@@ -275,7 +310,9 @@ class GameEngine extends ChangeNotifier {
 
   double _calculateBlockHp(int row, int col, int totalRows, int totalCols) {
     // HP cơ sở cao hơn để trận đấu kéo dài hơn
-    double baseHp = 50.0 + (level.id - 1) * 20.0;
+    double baseHp = isEndless
+        ? 50 * (1 + log(endlessWave) * 0.35)
+        : 50.0 + (level.id - 1) * 20.0;
     // Tính khoảng cách từ tâm (khối ở rìa ngoài trâu hơn)
     final centerRow = (totalRows - 1) / 2.0;
     final centerCol = (totalCols - 1) / 2.0;
@@ -299,19 +336,119 @@ class GameEngine extends ChangeNotifier {
     completionPercent = (brokenBlocksCount / totalBlocksCount).clamp(0.0, 1.0);
     if (brokenBlocksCount >= totalBlocksCount && !isLevelCompleted) {
       isLevelCompleted = true;
-      AudioService.playVictory();
-      onVictory?.call();
+      if (isEndless) {
+        _waveWait = 1.4;
+      } else {
+        AudioService.playVictory();
+        onVictory?.call();
+      }
     }
   }
 
   void update(double dt) {
-    if (!dt.isFinite || dt <= 0 || !isGridBuilt || isLevelCompleted) return;
+    if (!dt.isFinite || dt <= 0 || !isGridBuilt) return;
     final elapsed = min(dt, 0.1);
-    final steps = (elapsed / (1 / 120)).ceil();
-    for (int i = 0; i < steps && !isLevelCompleted; i++) {
-      _step(elapsed / steps);
+    elapsedTime += elapsed;
+    _hudTimer += elapsed;
+    _cameraSettle = max(0, _cameraSettle - elapsed * 1.5);
+    _particlesThisFrame = 0;
+    _breakRingsThisFrame = 0;
+    if (isExpanding) {
+      _waveWait -= elapsed;
+      _updateCosmetics(elapsed);
+      if (_waveWait <= 0) _advanceEndlessWave();
+    } else if (!isLevelCompleted) {
+      final steps = (elapsed / (1 / 120)).ceil();
+      for (int i = 0; i < steps && !isLevelCompleted; i++) {
+        _step(elapsed / steps);
+      }
     }
+    if (_hudTimer >= 0.1) {
+      _hudTimer = 0;
+      hudRevision.value++;
+    }
+    _processLevelUp();
     notifyListeners();
+  }
+
+  void _updateCosmetics(double dt) {
+    shockwaves.removeWhere((effect) => effect.update(dt));
+    lightningArcs.removeWhere((effect) => effect.update(dt));
+    debris.removeWhere((effect) => effect.update(dt));
+    floatingTexts.removeWhere((effect) => effect.update(dt));
+  }
+
+  void _advanceEndlessWave() {
+    // Collect outstanding rewards before replacing the board.
+    for (final drop in drops) {
+      if (drop.type == DropType.gold) {
+        gold += drop.value.toInt();
+      } else {
+        addExp(drop.value);
+      }
+    }
+    drops.clear();
+    arrows.clear();
+    hooks.clear();
+    debris.clear();
+    floatingTexts.clear();
+    mistZones.clear();
+    vortexZones.clear();
+    shockwaves.clear();
+    lightningArcs.clear();
+    _elementHitTimers.clear();
+    _firestormTimer = 0;
+    _fireBurstCooldown = _lightningCooldown = _mistCooldown = 0;
+    _permafrostCooldown = _superconductorCooldown = _explosiveGasCooldown = 0;
+    _acidMeltCooldown = _avalancheCooldown = _voidVortexCooldown =
+        _lavaBurstCooldown = 0;
+    _fusionCooldown = 0.6;
+    screenShake = 0;
+    shakeOffset = Offset.zero;
+    player.trail.clear();
+    for (final spirit in spirits) {
+      spirit.trail.clear();
+    }
+    endlessWave++;
+    level = MemeLevel.endlessWave(endlessWave);
+    isLevelCompleted = false;
+    _buildPixelGrid();
+    _cameraSettle = 1;
+    hudRevision.value++;
+  }
+
+  // A uniform grid makes each collision query local instead of scanning the board.
+  Iterable<PixelBlock> _blocksInRect(Rect rect) sync* {
+    if (blocks.isEmpty || !isGridBuilt) return;
+    final firstCol = max(0, ((rect.left - gridStartX) / gridBlockSize).floor());
+    final lastCol = min(
+      level.cols - 1,
+      ((rect.right - gridStartX) / gridBlockSize).floor(),
+    );
+    final firstRow = max(0, ((rect.top - gridStartY) / gridBlockSize).floor());
+    final lastRow = min(
+      level.rows - 1,
+      ((rect.bottom - gridStartY) / gridBlockSize).floor(),
+    );
+    for (int row = firstRow; row <= lastRow; row++) {
+      for (int col = firstCol; col <= lastCol; col++) {
+        final block = blocks[row * level.cols + col];
+        if (!block.health!.isDestroyed) yield block;
+      }
+    }
+  }
+
+  Iterable<PixelBlock> _blocksNear(Offset center, double radius) =>
+      _blocksInRect(Rect.fromCircle(center: center, radius: radius)).where(
+        (block) =>
+            (block.transform.position - center).distanceSquared <=
+            radius * radius,
+      );
+
+  @override
+  void dispose() {
+    hudRevision.dispose();
+    super.dispose();
   }
 
   void _step(double dt) {
@@ -319,11 +456,15 @@ class GameEngine extends ChangeNotifier {
     dt = min(dt, 0.05);
     _elementHitTimers.updateAll((key, value) => max(0.0, value - dt));
     _mistCooldown = max(0.0, _mistCooldown - dt);
+    _fusionCooldown = max(0.0, _fusionCooldown - dt);
+    _hitSoundCooldown = max(0.0, _hitSoundCooldown - dt);
+    _breakSoundCooldown = max(0.0, _breakSoundCooldown - dt);
+    _coinSoundCooldown = max(0.0, _coinSoundCooldown - dt);
 
     // Giảm dần độ rung màn hình rất nhanh (Screen Shake decay)
     if (screenShake > 0) {
       screenShake = max(0.0, screenShake - dt * 38.0);
-      final rng = Random();
+      final rng = _random;
       shakeOffset = Offset(
         (rng.nextDouble() - 0.5) * 2 * screenShake,
         (rng.nextDouble() - 0.5) * 2 * screenShake,
@@ -365,9 +506,10 @@ class GameEngine extends ChangeNotifier {
     for (final spirit in spirits) {
       spirit.update(dt, pCenter);
       final sPos = spirit.getPosition(pCenter);
-      for (final b in blocks) {
-        if (b.health!.isDestroyed) continue;
-        if (b.transform.rect.contains(sPos)) {
+      for (final b in _blocksInRect(
+        Rect.fromCircle(center: sPos, radius: spirit.size),
+      )) {
+        if (b.transform.rect.inflate(spirit.size * 0.5).contains(sPos)) {
           _damageBlock(b, totalDamage * 0.8 * dt * 5.0, 'TINH LINH');
           if (spirit.element == ElementType.fire) {
             b.elementAffinity?.applyFire(2.5, totalDamage * 0.25);
@@ -395,10 +537,7 @@ class GameEngine extends ChangeNotifier {
       vortex.pulse -= dt;
       if (vortex.pulse > 0) continue;
       vortex.pulse += 0.5;
-      for (final block in blocks) {
-        if (block.health!.isDestroyed ||
-            (block.transform.position - vortex.center).distance > 90)
-          continue;
+      for (final block in _blocksNear(vortex.center, 90).take(12)) {
         lightningArcs.add(
           LightningArc.createZigzag(
             vortex.center,
@@ -483,9 +622,9 @@ class GameEngine extends ChangeNotifier {
     final pt = player.transform;
     final r = player.radius;
 
-    for (final block in blocks) {
-      if (block.health!.isDestroyed) continue;
-
+    for (final block in _blocksInRect(
+      Rect.fromCircle(center: pt.position, radius: r),
+    )) {
       final rect = block.transform.rect;
       // Tìm điểm gần nhất trên hình chữ nhật tới tâm quả bóng
       final nearestX = pt.x.clamp(rect.left, rect.right);
@@ -653,8 +792,7 @@ class GameEngine extends ChangeNotifier {
     double dt,
     String hitLabel,
   ) {
-    for (final block in blocks) {
-      if (block.health!.isDestroyed) continue;
+    for (final block in _blocksInRect(Rect.fromPoints(start, end).inflate(2))) {
       final rect = block.transform.rect;
       if (_lineIntersectsRect(start, end, rect)) {
         _damageBlock(block, dmg * dt * 4.0, hitLabel);
@@ -716,8 +854,9 @@ class GameEngine extends ChangeNotifier {
         continue;
       }
       // Va chạm với khối
-      for (final block in blocks) {
-        if (block.health!.isDestroyed) continue;
+      for (final block in _blocksInRect(
+        Rect.fromCircle(center: arrow.transform.position, radius: 1),
+      )) {
         if (block.transform.rect.contains(arrow.transform.position) &&
             arrow.hitBlocks.add(block.id)) {
           _damageBlock(block, arrow.damage, 'BẮN TỈA');
@@ -749,8 +888,9 @@ class GameEngine extends ChangeNotifier {
         hooks.removeAt(i);
         continue;
       }
-      for (final block in blocks) {
-        if (block.health!.isDestroyed) continue;
+      for (final block in _blocksInRect(
+        Rect.fromCircle(center: hook.transform.position, radius: 1),
+      )) {
         if (block.transform.rect.contains(hook.transform.position) &&
             (hook.isReturning ? hook.returnHits : hook.outboundHits).add(
               block.id,
@@ -770,9 +910,8 @@ class GameEngine extends ChangeNotifier {
         continue;
       }
       // Gây DoT lên các khối trong bán kính sương mù
-      for (final block in blocks) {
-        if (block.health!.isDestroyed) continue;
-        if ((block.transform.position - mist.center).distance <= mist.radius) {
+      for (final block in _blocksNear(mist.center, mist.radius)) {
+        {
           _damageBlock(block, mist.damagePerSec * dt, 'SƯƠNG MÙ');
         }
       }
@@ -797,7 +936,7 @@ class GameEngine extends ChangeNotifier {
       if (ownedElements.contains(ElementType.fire)) {
         block.elementAffinity?.applyFire(3.0, totalDamage * 0.25);
         // Hỏa Nổ: 5% tỉ lệ và cooldown 1.6s
-        if (_fireBurstCooldown <= 0 && Random().nextDouble() < 0.05) {
+        if (_fireBurstCooldown <= 0 && _random.nextDouble() < 0.05) {
           _triggerFireBurst(block);
           _fireBurstCooldown = 1.6;
         }
@@ -814,7 +953,7 @@ class GameEngine extends ChangeNotifier {
       if (ownedElements.contains(ElementType.lightning)) {
         block.elementAffinity?.applyShock(1.5);
         // Lôi Điện: Giảm tỉ lệ từ 30% xuống 6% và thêm cooldown 2.0s để không spam
-        if (_lightningCooldown <= 0 && Random().nextDouble() < 0.06) {
+        if (_lightningCooldown <= 0 && _random.nextDouble() < 0.06) {
           _triggerLightningBolt(block);
           _lightningCooldown = 2.0;
         }
@@ -822,15 +961,23 @@ class GameEngine extends ChangeNotifier {
 
       // === CÁC DUNG HỢP NGUYÊN TỐ (FUSIONS) ===
       // 1. Sương Mù (Mist) — Hỏa + Thủy
-      if (activeFusions.contains(ElementType.mist) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.mist) &&
           _mistCooldown <= 0 &&
-          Random().nextDouble() < 0.06) {
-        mistZones.add(MistZone(center: block.transform.position));
+          _random.nextDouble() < 0.06) {
+        _fusionCooldown = 0.6;
+        mistZones.add(
+          MistZone(
+            center: block.transform.position,
+            damagePerSec: totalDamage * 0.45,
+          ),
+        );
         _mistCooldown = 2.5;
       }
 
       // 2. Nhiễm Điện (Chain Lightning) — Thủy + Lôi
-      if (activeFusions.contains(ElementType.chainLightning) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.chainLightning) &&
           _lightningCooldown <= 0 &&
           (block.elementAffinity?.isSoaked ?? false)) {
         _triggerChainLightning(block);
@@ -838,22 +985,25 @@ class GameEngine extends ChangeNotifier {
       }
 
       // 3. Bão Lửa (Firestorm) — Hỏa + Phong
-      if (activeFusions.contains(ElementType.firestorm) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.firestorm) &&
           _firestormTimer <= 0 &&
-          Random().nextDouble() < 0.08) {
+          _random.nextDouble() < 0.08) {
         _triggerFirestorm();
       }
 
       // 4. Băng Vĩnh Cửu (Permafrost) — Thủy + Băng
-      if (activeFusions.contains(ElementType.permafrost) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.permafrost) &&
           _permafrostCooldown <= 0 &&
-          Random().nextDouble() < 0.08) {
+          _random.nextDouble() < 0.08) {
         _triggerPermafrost(block);
         _permafrostCooldown = 3.5;
       }
 
       // 5. Siêu Dẫn (Superconductor) — Băng + Lôi
-      if (activeFusions.contains(ElementType.superconductor) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.superconductor) &&
           _superconductorCooldown <= 0 &&
           (block.elementAffinity?.isFrozen ?? false)) {
         _triggerSuperconductor(block);
@@ -861,51 +1011,58 @@ class GameEngine extends ChangeNotifier {
       }
 
       // 6. Khí Nổ (Explosive Gas) — Độc + Hỏa
-      if (activeFusions.contains(ElementType.explosiveGas) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.explosiveGas) &&
           _explosiveGasCooldown <= 0 &&
           ((block.elementAffinity?.burnTimer ?? 0) > 0 ||
               (block.elementAffinity?.poisonTimer ?? 0) > 0) &&
-          Random().nextDouble() < 0.08) {
+          _random.nextDouble() < 0.08) {
         _triggerExplosiveGas(block);
         _explosiveGasCooldown = 3.5;
       }
 
       // 7. Axit Ăn Mòn (Acid Melt) — Độc + Thủy
-      if (activeFusions.contains(ElementType.acidMelt) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.acidMelt) &&
           _acidMeltCooldown <= 0 &&
-          Random().nextDouble() < 0.10) {
+          _random.nextDouble() < 0.10) {
         _triggerAcidMelt(block);
         _acidMeltCooldown = 2.0;
       }
 
       // 8. Lở Tuyết (Avalanche) — Băng + Địa
-      if (activeFusions.contains(ElementType.avalanche) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.avalanche) &&
           _avalancheCooldown <= 0 &&
-          Random().nextDouble() < 0.05) {
+          _random.nextDouble() < 0.05) {
         _triggerAvalanche(block);
         _avalancheCooldown = 4.5;
       }
 
       // 9. Hố Đen Lôi Đình (Void Vortex) — Bóng Tối + Lôi
-      if (activeFusions.contains(ElementType.voidVortex) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.voidVortex) &&
           _voidVortexCooldown <= 0 &&
-          Random().nextDouble() < 0.06) {
+          _random.nextDouble() < 0.06) {
         _triggerVoidVortex(block);
         _voidVortexCooldown = 4.0;
       }
 
       // 10. Dung Nham (Lava Burst) — Hỏa + Địa
-      if (activeFusions.contains(ElementType.lavaBurst) &&
+      if (_fusionCooldown <= 0 &&
+          activeFusions.contains(ElementType.lavaBurst) &&
           _lavaBurstCooldown <= 0 &&
-          Random().nextDouble() < 0.08) {
+          _random.nextDouble() < 0.08) {
         _triggerLavaBurst(block);
         _lavaBurstCooldown = 3.0;
       }
     }
     // Chớp sáng trắng khi bị đánh trúng & Rung cực nhẹ (tinh tế, không gây nhức mắt)
-    block.hitFlashTimer = 0.08;
-    screenShake = max(screenShake, 0.5);
-    AudioService.playHit();
+    if (triggerElements) block.hitFlashTimer = 0.1;
+    if (triggerElements && _hitSoundCooldown <= 0) {
+      AudioService.playHit();
+      _hitSoundCooldown = 0.06;
+    }
 
     final justDestroyed = block.takeDamage(dmg);
 
@@ -917,9 +1074,8 @@ class GameEngine extends ChangeNotifier {
   // Cập nhật vòng xoáy Bão Lửa (Firestorm) quét quanh bóng
   void _updateFirestormAura(double dt) {
     final center = player.transform.position;
-    for (final b in blocks) {
-      if (b.health!.isDestroyed) continue;
-      if ((b.transform.position - center).distance < 75) {
+    for (final b in _blocksNear(center, 75)) {
+      {
         b.elementAffinity?.applyFire(2.0, totalDamage * 0.3);
         final killed = b.takeDamage(totalDamage * 0.5 * dt);
         if (killed) _onBlockDestroyed(b);
@@ -987,19 +1143,30 @@ class GameEngine extends ChangeNotifier {
   }
 
   void _triggerChainLightning(PixelBlock origin) {
+    _fusionCooldown = 0.6;
     AudioService.playLightning();
     final visited = <PixelBlock>{origin};
     final queue = <PixelBlock>[origin];
-    for (int i = 0; i < queue.length; i++) {
+    for (
+      int i = 0;
+      i < queue.length && visited.length <= maxChainTargets;
+      i++
+    ) {
       final from = queue[i];
-      for (final block in blocks) {
+      for (final block in _blocksNear(
+        from.transform.position,
+        gridBlockSize * 1.5,
+      )) {
+        if (visited.length >= maxChainTargets) break;
         if (visited.contains(block) ||
             block.health!.isDestroyed ||
-            !(block.elementAffinity?.isSoaked ?? false))
+            !(block.elementAffinity?.isSoaked ?? false)) {
           continue;
+        }
         if ((block.transform.position - from.transform.position).distance >
-            gridBlockSize * 1.5)
+            gridBlockSize * 1.5) {
           continue;
+        }
         visited.add(block);
         queue.add(block);
         lightningArcs.add(
@@ -1017,6 +1184,7 @@ class GameEngine extends ChangeNotifier {
 
   // === BÃO LỬA (Firestorm) — Hỏa + Phong: Lốc xoáy lửa thiêu rụi các khối quanh bóng ===
   void _triggerFirestorm() {
+    _fusionCooldown = 0.6;
     final center = player.transform.position;
     floatingTexts.add(
       FloatingText(
@@ -1045,6 +1213,7 @@ class GameEngine extends ChangeNotifier {
 
   // === BĂNG VĨNH CỬU (Permafrost) — Thủy + Băng: Đóng băng tức thì cụm khối ===
   void _triggerPermafrost(PixelBlock origin) {
+    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '❄️ BĂNG VĨNH CỬU!',
@@ -1073,6 +1242,7 @@ class GameEngine extends ChangeNotifier {
 
   // === SIÊU DẪN (Superconductor) — Băng + Lôi: Phóng điện trường lạnh nổ lan xuyên giáp ===
   void _triggerSuperconductor(PixelBlock origin) {
+    _fusionCooldown = 0.6;
     AudioService.playLightning();
     floatingTexts.add(
       FloatingText(
@@ -1105,6 +1275,7 @@ class GameEngine extends ChangeNotifier {
 
   // === KHÍ NỔ (Explosive Gas) — Độc + Hỏa: Nổ diện rộng khi Độc và Lửa chạm nhau ===
   void _triggerExplosiveGas(PixelBlock origin) {
+    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '💥☠️ KHÍ NỔ!',
@@ -1131,6 +1302,7 @@ class GameEngine extends ChangeNotifier {
 
   // === AXIT ĂN MÒN (Acid Melt) — Độc + Thủy: Tan chảy thanh HP tối đa của khối ===
   void _triggerAcidMelt(PixelBlock target) {
+    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '🧪 AXIT!',
@@ -1159,6 +1331,7 @@ class GameEngine extends ChangeNotifier {
 
   // === LỞ TUYẾT (Avalanche) — Băng + Địa: Sóng tuyết càn quét cả hàng pixel ===
   void _triggerAvalanche(PixelBlock origin) {
+    _fusionCooldown = 0.6;
     shockwaves.add(
       ShockwaveRing(center: origin.transform.position, color: Colors.white),
     );
@@ -1183,6 +1356,7 @@ class GameEngine extends ChangeNotifier {
 
   // === HỐ ĐEN LÔI ĐÌNH (Void Vortex) — Bóng Tối + Lôi: Hút tụ khối và giật sét ===
   void _triggerVoidVortex(PixelBlock origin) {
+    _fusionCooldown = 0.6;
     vortexZones.add(VoidVortexZone(origin.transform.position));
     AudioService.playLightning();
     floatingTexts.add(
@@ -1221,6 +1395,7 @@ class GameEngine extends ChangeNotifier {
 
   // === DUNG NHAM (Lava Burst) — Hỏa + Địa: Bắn tàn nham nóng chảy ===
   void _triggerLavaBurst(PixelBlock origin) {
+    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '🌋 DUNG NHAM!',
@@ -1248,28 +1423,37 @@ class GameEngine extends ChangeNotifier {
     block.isRevealed = true;
 
     // Kích hoạt Rung giật màn hình vừa vặn (2.5px), sóng xung kích và âm thanh nổ vỡ
-    screenShake = max(screenShake, 2.5);
-    AudioService.playBlockBreak();
-    shockwaves.add(
-      ShockwaveRing(center: block.transform.position, color: block.memeColor),
-    );
+    screenShake = max(screenShake, 0.7);
+    if (_breakSoundCooldown <= 0) {
+      AudioService.playBlockBreak();
+      _breakSoundCooldown = 0.05;
+    }
+    if (_breakRingsThisFrame++ < 2) {
+      shockwaves.add(
+        ShockwaveRing(center: block.transform.position, color: block.memeColor),
+      );
+    }
     onBlockDestroyedEffect?.call();
 
     // 1. Tạo các hạt vỡ nổ tung (Debris) nhiều và xoay sống động
-    final rng = Random();
-    for (int i = 0; i < 14; i++) {
+    final rng = _random;
+    for (
+      int i = 0;
+      i < 4 && _particlesThisFrame < 28;
+      i++, _particlesThisFrame++
+    ) {
       final pAngle = rng.nextDouble() * 2 * pi;
-      final pSpeed = rng.nextDouble() * 160 + 50;
+      final pSpeed = rng.nextDouble() * 65 + 25;
       debris.add(
         PixelDebris(
           x: block.transform.x,
           y: block.transform.y,
           vx: cos(pAngle) * pSpeed,
           vy: sin(pAngle) * pSpeed,
-          size: rng.nextDouble() * 5 + 3,
+          size: rng.nextDouble() * 2 + 1.2,
           color: (i % 3 == 0) ? Colors.white : block.memeColor,
           rotSpeed: (rng.nextDouble() - 0.5) * 14.0,
-          isSparkle: i % 4 == 0,
+          isSparkle: false,
         ),
       );
     }
@@ -1282,7 +1466,7 @@ class GameEngine extends ChangeNotifier {
       expVal *= 1.25;
     }
 
-    drops.add(
+    _addDrop(
       DropItem(
         id: 'gold_${DateTime.now().microsecondsSinceEpoch}',
         transform: TransformComponent(
@@ -1296,7 +1480,7 @@ class GameEngine extends ChangeNotifier {
       ),
     );
 
-    drops.add(
+    _addDrop(
       DropItem(
         id: 'exp_${DateTime.now().microsecondsSinceEpoch}',
         transform: TransformComponent(
@@ -1310,15 +1494,17 @@ class GameEngine extends ChangeNotifier {
       ),
     );
 
-    // Hiển thị text bay sảng khoái
-    floatingTexts.add(
-      FloatingText(
-        text: '+${goldVal.toInt()}G',
-        x: block.transform.x,
-        y: block.transform.y - 10,
-        color: Colors.amber,
-      ),
-    );
+    // Labels are sampled; a large blast should not cover the artwork.
+    if (_breakRingsThisFrame <= 2) {
+      floatingTexts.add(
+        FloatingText(
+          text: '+${goldVal.toInt()}G',
+          x: block.transform.x,
+          y: block.transform.y - 10,
+          color: Colors.amber,
+        ),
+      );
+    }
   }
 
   void _updateDrops(double dt) {
@@ -1362,7 +1548,10 @@ class GameEngine extends ChangeNotifier {
         } else {
           addExp(drop.value);
         }
-        AudioService.playCoinCollect();
+        if (_coinSoundCooldown <= 0) {
+          AudioService.playCoinCollect();
+          _coinSoundCooldown = 0.08;
+        }
         drops.removeAt(i);
       } else if (drop.lifeTime <= 0) {
         drops.removeAt(i);
@@ -1370,9 +1559,34 @@ class GameEngine extends ChangeNotifier {
     }
   }
 
+  void _addDrop(DropItem item) {
+    if (drops.length < maxDrops) {
+      drops.add(item);
+      return;
+    }
+    for (int i = drops.length - 1; i >= 0; i--) {
+      if (drops[i].type == item.type) {
+        drops[i].value += item.value;
+        return;
+      }
+    }
+    // If the buffer contains only the other resource, collect one to make room.
+    final oldest = drops.removeAt(0);
+    if (oldest.type == DropType.gold) {
+      gold += oldest.value.toInt();
+    } else {
+      addExp(oldest.value);
+    }
+    drops.add(item);
+  }
+
   void addExp(double amount) {
     exp += amount;
-    if (exp >= expToNextLevel) {
+  }
+
+  void _processLevelUp() {
+    // Emit one choice at a time, even if an explosion collects many gems.
+    if (exp >= expToNextLevel && !isLevelCompleted) {
       exp -= expToNextLevel;
       characterLevel++;
       expToNextLevel = (expToNextLevel * 1.35).roundToDouble();
@@ -1418,6 +1632,7 @@ class GameEngine extends ChangeNotifier {
   }
 
   void summonSpirit([ElementType? el]) {
+    if (spirits.length >= 4) return;
     spiritUpgradeLevel++;
     final colors = [
       Colors.cyanAccent,

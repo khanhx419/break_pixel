@@ -23,6 +23,32 @@ class MemeLevel {
     _finePixels(_createPopcatLevel()),
   ];
 
+  static const int maxEndlessSide = 48;
+
+  /// Replaces each cleared board rather than retaining an ever-growing world.
+  static MemeLevel endlessWave(int wave) {
+    assert(wave > 0);
+    final source = allLevels[(wave - 1) % 3];
+    final side = (28 + (wave - 1) * 4).clamp(28, maxEndlessSide);
+    return MemeLevel(
+      id: 1,
+      title: 'Vô tận · Đợt $wave',
+      memeName: source.memeName,
+      cols: side,
+      rows: side,
+      colorGrid: List.generate(
+        side,
+        (row) => List.generate(
+          side,
+          (col) =>
+              source.colorGrid[row * source.rows ~/ side][col *
+                  source.cols ~/
+                  side],
+        ),
+      ),
+    );
+  }
+
   // Each artwork pixel becomes four independently breakable tiles.
   // Preserve the original palette exactly in the revealed image.
   static MemeLevel _finePixels(MemeLevel source) => MemeLevel(

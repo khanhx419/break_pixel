@@ -5,7 +5,6 @@ import '../game/game_engine.dart';
 import '../game/game_painter.dart';
 import '../models/character.dart';
 import '../models/pixel_art_data.dart';
-import '../core/audio_service.dart';
 import 'forge_modal.dart';
 import 'fusion_lab_modal.dart';
 import 'level_up_modal.dart';
@@ -16,6 +15,7 @@ class GameScreen extends StatefulWidget {
   final RoleInfo role;
   final RaceInfo race;
   final int levelIndex;
+  final bool isEndless;
   final bool isYetiUnlocked;
 
   const GameScreen({
@@ -23,6 +23,7 @@ class GameScreen extends StatefulWidget {
     required this.role,
     required this.race,
     this.levelIndex = 0,
+    this.isEndless = false,
     this.isYetiUnlocked = false,
   });
 
@@ -49,6 +50,7 @@ class _GameScreenState extends State<GameScreen>
       role: widget.role,
       race: widget.race,
       level: currentLevel,
+      isEndless: widget.isEndless,
     );
 
     // Đăng ký callbacks
@@ -85,7 +87,7 @@ class _GameScreenState extends State<GameScreen>
 
   void _showLevelUpDialog() {
     setState(() => _isPaused = true);
-    AudioService.playLevelUp();
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -102,7 +104,6 @@ class _GameScreenState extends State<GameScreen>
 
   void _showVictoryDialog() {
     setState(() => _isPaused = true);
-    AudioService.playVictory();
 
     final isFinal = (widget.levelIndex == MemeLevel.allLevels.length - 1);
     if (isFinal) {
@@ -185,7 +186,7 @@ class _GameScreenState extends State<GameScreen>
                     constraints.maxWidth,
                     constraints.maxHeight,
                   );
-                  _engine.resize(size);
+                  _engine.resize(size, notify: false);
 
                   return GestureDetector(
                     onPanUpdate: (details) {
@@ -211,7 +212,12 @@ class _GameScreenState extends State<GameScreen>
     );
   }
 
-  Widget _buildTopHUD() {
+  Widget _buildTopHUD() => ValueListenableBuilder<int>(
+    valueListenable: _engine.hudRevision,
+    builder: (context, value, child) => _buildTopHUDContent(),
+  );
+
+  Widget _buildTopHUDContent() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       color: const Color(0xFF1E293B),
@@ -242,7 +248,9 @@ class _GameScreenState extends State<GameScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _engine.level.title,
+                      _engine.isExpanding
+                          ? 'Đã hé lộ tranh · Đang mở rộng…'
+                          : _engine.level.title,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 13,
@@ -302,15 +310,12 @@ class _GameScreenState extends State<GameScreen>
                       size: 18,
                     ),
                     const SizedBox(width: 4),
-                    AnimatedBuilder(
-                      animation: _engine,
-                      builder: (context, _) => Text(
-                        '${_engine.gold}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                    Text(
+                      '${_engine.gold}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
                       ),
                     ),
                   ],

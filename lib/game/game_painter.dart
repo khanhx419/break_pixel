@@ -24,6 +24,13 @@ class GamePainter extends CustomPainter {
     _drawBackground(canvas, size, paint);
 
     canvas.save();
+    final boardCenter = Offset(
+      engine.gridStartX + engine.level.cols * engine.gridBlockSize / 2,
+      engine.gridStartY + engine.level.rows * engine.gridBlockSize / 2,
+    );
+    canvas.translate(boardCenter.dx, boardCenter.dy);
+    canvas.scale(engine.cameraScale);
+    canvas.translate(-boardCenter.dx, -boardCenter.dy);
     canvas.clipRect(
       Rect.fromLTWH(
         engine.gridStartX,
@@ -32,17 +39,16 @@ class GamePainter extends CustomPainter {
         engine.level.rows * engine.gridBlockSize,
       ),
     );
-    // 2. Vẽ các vùng Sương mù (Mist Zones)
-    for (final mist in engine.mistZones) {
-      mist.draw(canvas, paint);
-    }
-
     // 3. Vẽ Lớp Bức Tranh Meme Ẩn bên dưới (đối với những ô đã vỡ)
     _drawRevealedMemeLayer(canvas, paint);
 
     // 4. Vẽ các Khối Pixel còn nguyên hoặc đang bị nứt
     for (final block in engine.blocks) {
-      block.draw(canvas, paint);
+      block.draw(canvas, paint, time: engine.elapsedTime);
+    }
+
+    for (final mist in engine.mistZones) {
+      mist.draw(canvas, paint);
     }
 
     // 5. Vẽ Sóng xung kích phát sáng nổ vỡ (Shockwaves)
@@ -96,6 +102,7 @@ class GamePainter extends CustomPainter {
     // 13. Vẽ Chữ số sát thương & text trạng thái bay lên
     canvas.restore();
     _drawFloatingTexts(canvas);
+    if (engine.isExpanding) _drawExpansionBanner(canvas, size);
 
     canvas.restore();
   }
@@ -139,14 +146,14 @@ class GamePainter extends CustomPainter {
     canvas.drawRect(worldRect, paint);
 
     // Tường biên giới bức tranh (Outer Barrier): Phát sáng neon chặn bóng nảy bên trong
-    paint.color = Colors.cyanAccent.withOpacity(0.85);
+    paint.color = const Color(0xFF657D91).withValues(alpha: 0.65);
     paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 3.0;
+    paint.strokeWidth = 1.0;
     canvas.drawRect(worldRect, paint);
 
     // Hào quang viền tường ngoài
-    paint.color = Colors.cyanAccent.withOpacity(0.25);
-    paint.strokeWidth = 6.0;
+    paint.color = const Color(0xFF657D91).withValues(alpha: 0.1);
+    paint.strokeWidth = 3.0;
     canvas.drawRect(worldRect.inflate(2.0), paint);
   }
 
@@ -352,39 +359,65 @@ class GamePainter extends CustomPainter {
         canvas,
         Offset(textItem.x - textPainter.width / 2, textItem.y),
       );
+      textPainter.dispose();
     }
   }
 
   void _drawFirestormVortex(Canvas canvas, Paint paint) {
     final center = engine.player.transform.position;
-    final r = engine.player.radius;
-    final time = DateTime.now().millisecondsSinceEpoch / 1000.0;
-
-    // Vầng hào quang lửa lan tỏa
-    final vortexPaint = Paint()
-      ..color = Colors.deepOrangeAccent.withOpacity(0.35)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
-    canvas.drawCircle(center, r + 24, vortexPaint);
-
-    // Cung lốc xoáy lửa cuộn tròn quanh bóng
-    const arms = 4;
-    for (int i = 0; i < arms; i++) {
-      final angle = time * 6.0 + i * (2 * pi / arms);
-      final armPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.2
-        ..strokeCap = StrokeCap.round
-        ..color = (i % 2 == 0 ? Colors.amberAccent : Colors.deepOrange)
-            .withOpacity(0.85);
-
+    paint
+      ..style = PaintingStyle.fill
+      ..color = const Color(0x12DF663C);
+    canvas.drawCircle(center, 75, paint);
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    for (int i = 0; i < 3; i++) {
+      paint
+        ..strokeWidth = 1.5 + i * 0.3
+        ..color = (i == 1 ? const Color(0xFFE9BB74) : const Color(0xFFDB794D))
+            .withValues(alpha: 0.6);
       canvas.drawArc(
-        Rect.fromCircle(center: center, radius: r + 14 + (i * 3)),
-        angle,
-        0.8,
+        Rect.fromCircle(center: center, radius: 52.0 + i * 10),
+        engine.elapsedTime * 3 + i * 2.1,
+        1.2,
         false,
-        armPaint,
+        paint,
       );
     }
+    paint
+      ..strokeCap = StrokeCap.butt
+      ..style = PaintingStyle.fill;
+  }
+
+  void _drawExpansionBanner(Canvas canvas, Size size) {
+    final label = TextPainter(
+      text: const TextSpan(
+        text: 'HOÀN THÀNH · ĐANG MỞ RỘNG',
+        style: TextStyle(
+          color: Color(0xFFE2E9EE),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.2,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width - 40);
+    final position = Offset((size.width - label.width) / 2, 18);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          position.dx - 14,
+          position.dy - 8,
+          label.width + 28,
+          label.height + 16,
+        ),
+        const Radius.circular(8),
+      ),
+      Paint()..color = const Color(0xE6152130),
+    );
+    label.paint(canvas, position);
+    label.dispose();
   }
 
   @override

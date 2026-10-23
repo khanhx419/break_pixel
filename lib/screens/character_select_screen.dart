@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../models/character.dart';
 import 'game_screen.dart';
 
@@ -12,6 +13,7 @@ class CharacterSelectScreen extends StatefulWidget {
 }
 
 class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
+  bool _isEndless = false;
   RoleInfo _selectedRole = RoleInfo.allRoles[0]; // Chiến binh mặc định
   RaceInfo _selectedRace = RaceInfo.allRaces[0]; // Người mặc định
 
@@ -37,10 +39,45 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
           children: [
             // Preview Nhân vật kết hợp
             _buildCharacterPreview(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ChoiceChip(
+                      label: const Text('Cốt truyện'),
+                      avatar: const Icon(Icons.auto_stories_outlined, size: 18),
+                      selected: !_isEndless,
+                      onSelected: (_) => setState(() => _isEndless = false),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ChoiceChip(
+                      label: const Text('Vô tận'),
+                      avatar: const Icon(Icons.all_inclusive, size: 18),
+                      selected: _isEndless,
+                      onSelected: (_) => setState(() => _isEndless = true),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_isEndless)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Text(
+                  'Hết khối → bản đồ lớn hơn. Giữ nguyên vàng và nâng cấp.',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+              ),
 
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 8.0,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -146,11 +183,7 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
               gradient: RadialGradient(
                 center: const Alignment(-0.3, -0.3),
                 radius: 0.8,
-                colors: [
-                  Colors.white,
-                  _selectedRole.themeColor,
-                  Colors.black,
-                ],
+                colors: [Colors.white, _selectedRole.themeColor, Colors.black],
               ),
             ),
             child: Center(
@@ -183,10 +216,7 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
                 const SizedBox(height: 4),
                 Text(
                   'Nội tại: ${_selectedRace.passiveName}',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
               ],
             ),
@@ -285,8 +315,8 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
               color: isLocked
                   ? Colors.black26
                   : (isSelected
-                      ? race.themeColor.withOpacity(0.18)
-                      : const Color(0xFF1E293B).withOpacity(0.6)),
+                        ? race.themeColor.withOpacity(0.18)
+                        : const Color(0xFF1E293B).withOpacity(0.6)),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: isSelected && !isLocked
@@ -314,7 +344,9 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
                             style: TextStyle(
                               color: isLocked
                                   ? Colors.grey
-                                  : (isSelected ? race.themeColor : Colors.white),
+                                  : (isSelected
+                                        ? race.themeColor
+                                        : Colors.white),
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
                             ),
@@ -323,7 +355,9 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
                             Container(
                               margin: const EdgeInsets.only(left: 8),
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.blue.withOpacity(0.3),
                                 borderRadius: BorderRadius.circular(4),
@@ -366,6 +400,7 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
           role: _selectedRole,
           race: _selectedRace,
           levelIndex: 0,
+          isEndless: _isEndless,
           isYetiUnlocked: widget.isYetiUnlocked,
         ),
       ),

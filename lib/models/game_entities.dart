@@ -53,175 +53,184 @@ class PixelBlock extends GameEntity {
   }
 
   @override
-  void draw(Canvas canvas, Paint paint) {
+  void draw(Canvas canvas, Paint paint, {double time = 0}) {
     if (health?.isDestroyed ?? false) return;
+    final cell = transform.rect;
+    final unit = cell.width;
+    final rect = cell.deflate(min(0.6, unit * 0.045));
+    final shape = RRect.fromRectAndRadius(rect, Radius.circular(unit * 0.09));
+    final affinity = elementAffinity;
+    final frozen = affinity?.isFrozen ?? false;
+    final wet = affinity?.isSoaked ?? false;
+    final burning = (affinity?.burnTimer ?? 0) > 0;
+    final poisoned = (affinity?.poisonTimer ?? 0) > 0;
+    final shocked = (affinity?.shockTimer ?? 0) > 0;
+    final phase = time * 2.4 + row * 0.7 + col * 1.3;
+    var face = (row + col) % 2 == 0
+        ? const Color(0xFF27384B)
+        : const Color(0xFF2C3C50);
+    if (wet) face = Color.lerp(face, const Color(0xFF267A9B), 0.35)!;
+    if (poisoned) face = Color.lerp(face, const Color(0xFF668A41), 0.35)!;
+    if (burning) face = Color.lerp(face, const Color(0xFF9B432B), 0.48)!;
+    if (frozen) face = Color.lerp(face, const Color(0xFF8BC7DC), 0.55)!;
+    if (shocked) face = Color.lerp(face, const Color(0xFFBDA669), 0.24)!;
+    if (hitFlashTimer > 0)
+      face = Color.lerp(
+        face,
+        Colors.white,
+        (hitFlashTimer / 0.1).clamp(0, 1) * 0.45,
+      )!;
 
-    final rect = transform.rect;
-    final r = RRect.fromRectAndRadius(
-      rect.deflate(0.5),
-      const Radius.circular(1),
+    paint
+      ..shader = null
+      ..maskFilter = null
+      ..style = PaintingStyle.fill
+      ..color = face;
+    canvas.drawRRect(shape, paint);
+    // A restrained bevel keeps the material readable underneath every status.
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = max(0.5, unit * 0.045)
+      ..color = Colors.white.withValues(alpha: frozen ? 0.35 : 0.12);
+    canvas.drawLine(
+      rect.topLeft + Offset(unit * 0.12, unit * 0.08),
+      rect.topRight + Offset(-unit * 0.12, unit * 0.08),
+      paint,
+    );
+    paint.color = Colors.black.withValues(alpha: 0.22);
+    canvas.drawLine(
+      rect.bottomLeft + Offset(unit * 0.1, -unit * 0.05),
+      rect.bottomRight + Offset(-unit * 0.1, -unit * 0.05),
+      paint,
     );
 
-    // Hiệu ứng chớp sáng trắng khi bị đánh trúng (Hit Flash)
-    if (hitFlashTimer > 0) {
-      paint.color = Colors.white;
-      paint.style = PaintingStyle.fill;
-      canvas.drawRRect(r, paint);
-      return;
-    }
-
-    // 1. Nếu bị đóng băng (Frost / Ice)
-    if (elementAffinity?.isFrozen ?? false) {
-      paint.color = const Color(0xFF38BDF8);
-      paint.style = PaintingStyle.fill;
-      canvas.drawRRect(r, paint);
-      // Vẽ tinh thể hoa tuyết trắng nổi bật ở tâm khối
-      paint.color = Colors.white;
-      paint.style = PaintingStyle.stroke;
-      paint.strokeWidth = 1.6;
-      final cx = rect.center.dx;
-      final cy = rect.center.dy;
-      const s = 5.0;
-      canvas.drawLine(Offset(cx - s, cy), Offset(cx + s, cy), paint);
-      canvas.drawLine(Offset(cx, cy - s), Offset(cx, cy + s), paint);
+    if (wet) {
+      final surface = rect.bottom - unit * (0.2 + sin(phase) * 0.04);
+      paint
+        ..style = PaintingStyle.fill
+        ..color = const Color(0x4447C4E6);
+      canvas.drawRect(
+        Rect.fromLTRB(rect.left, surface, rect.right, rect.bottom),
+        paint,
+      );
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.6, unit * 0.045)
+        ..color = const Color(0xAA9DE7F2);
       canvas.drawLine(
-        Offset(cx - s * 0.7, cy - s * 0.7),
-        Offset(cx + s * 0.7, cy + s * 0.7),
+        Offset(rect.left + unit * 0.1, surface),
+        Offset(rect.right - unit * 0.1, surface),
+        paint,
+      );
+    }
+    if (frozen) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.6, unit * 0.055)
+        ..color = const Color(0xBBB9EAF2);
+      canvas.drawRRect(shape, paint);
+      final center = rect.center;
+      canvas.drawLine(
+        center + Offset(-unit * 0.28, -unit * 0.27),
+        center + Offset(unit * 0.2, unit * 0.24),
         paint,
       );
       canvas.drawLine(
-        Offset(cx - s * 0.7, cy + s * 0.7),
-        Offset(cx + s * 0.7, cy - s * 0.7),
+        center + Offset(unit * 0.02, -unit * 0.02),
+        center + Offset(unit * 0.23, -unit * 0.2),
         paint,
       );
-      // Viền băng lấp lánh
-      paint.color = Colors.cyanAccent;
-      paint.strokeWidth = 1.5;
-      canvas.drawRRect(r, paint);
-      return;
     }
-
-    // 2. Nếu đang bị đốt cháy (Fire / Burn)
-    if (elementAffinity?.burnTimer != null && elementAffinity!.burnTimer > 0) {
-      paint.color = Colors.deepOrange;
-      paint.style = PaintingStyle.fill;
-      canvas.drawRRect(r, paint);
-      // Vẽ ngọn lửa bập bùng trên đỉnh khối pixel
-      paint.color = Colors.amberAccent;
-      paint.style = PaintingStyle.fill;
-      final flamePath = Path()
-        ..moveTo(rect.left + 4, rect.top + 5)
-        ..lineTo(rect.left + rect.width * 0.35, rect.top - 2)
-        ..lineTo(rect.left + rect.width * 0.5, rect.top + 4)
-        ..lineTo(rect.left + rect.width * 0.7, rect.top - 3)
-        ..lineTo(rect.right - 4, rect.top + 5)
-        ..close();
-      canvas.drawPath(flamePath, paint);
-      // Viền lửa cam rực rỡ
-      paint.color = Colors.yellowAccent;
+    if (burning) {
+      // Two small, animated ember tongues; no particle emitter per tile.
       paint.style = PaintingStyle.stroke;
-      paint.strokeWidth = 1.2;
-      canvas.drawRRect(r, paint);
-      return;
-    }
-
-    // 3. Nếu đang bị nhiễm độc (Poison)
-    if (elementAffinity?.poisonTimer != null &&
-        elementAffinity!.poisonTimer > 0) {
-      paint.color = const Color(0xFF16A34A);
-      paint.style = PaintingStyle.fill;
-      canvas.drawRRect(r, paint);
-      // Bong bóng độc xanh lục / tím
-      paint.color = Colors.purpleAccent.withOpacity(0.8);
-      paint.style = PaintingStyle.fill;
-      canvas.drawCircle(
-        Offset(rect.center.dx - 3, rect.center.dy - 2),
-        3.0,
-        paint,
-      );
-      paint.color = Colors.greenAccent;
-      canvas.drawCircle(
-        Offset(rect.center.dx + 4, rect.center.dy + 3),
-        2.2,
-        paint,
-      );
-      // Viền độc tím
-      paint.color = Colors.purpleAccent;
-      paint.style = PaintingStyle.stroke;
-      paint.strokeWidth = 1.4;
-      canvas.drawRRect(r, paint);
-      return;
-    }
-
-    // 4. Nếu đang bị nhiễm điện / giật sét (Shock)
-    if (elementAffinity?.shockTimer != null &&
-        elementAffinity!.shockTimer > 0) {
-      paint.color = const Color(0xFFFBBF24);
-      paint.style = PaintingStyle.fill;
-      canvas.drawRRect(r, paint);
-      // Tia sét vàng zigzag trên khối
-      paint.color = Colors.white;
-      paint.style = PaintingStyle.stroke;
-      paint.strokeWidth = 1.6;
-      final path = Path()
-        ..moveTo(rect.left + 4, rect.top + 4)
-        ..lineTo(rect.center.dx + 2, rect.center.dy - 1)
-        ..lineTo(rect.center.dx - 2, rect.center.dy + 2)
-        ..lineTo(rect.right - 4, rect.bottom - 4);
-      canvas.drawPath(path, paint);
-      return;
-    }
-
-    // Màu của khối gạch bảo vệ chưa vỡ (Lớp vỏ che giấu bức tranh meme bên dưới)
-    final hpPct = health?.hpPercent ?? 1.0;
-    paint.color = const Color(0xFF2C3545); // Màu xám thép khối đặc trưng
-    paint.style = PaintingStyle.fill;
-    canvas.drawRRect(r, paint);
-
-    // Gờ viền 3D nổi của khối gạch pixel
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 1.2;
-    paint.color = const Color(0xFF475569); // Cạnh trên & trái sáng
-    canvas.drawLine(
-      Offset(rect.left + 2, rect.bottom - 2),
-      Offset(rect.left + 2, rect.top + 2),
-      paint,
-    );
-    canvas.drawLine(
-      Offset(rect.left + 2, rect.top + 2),
-      Offset(rect.right - 2, rect.top + 2),
-      paint,
-    );
-
-    paint.color = const Color(0xFF1E2633); // Cạnh dưới & phải tối
-    canvas.drawLine(
-      Offset(rect.right - 2, rect.top + 2),
-      Offset(rect.right - 2, rect.bottom - 2),
-      paint,
-    );
-    canvas.drawLine(
-      Offset(rect.left + 2, rect.bottom - 2),
-      Offset(rect.right - 2, rect.bottom - 2),
-      paint,
-    );
-
-    // Vẽ vết nứt vỡ khi bị mất máu
-    if (hpPct < 0.75) {
-      paint.color = Colors.black.withOpacity(0.55);
-      paint.strokeWidth = 1.4;
-      canvas.drawLine(
-        Offset(rect.left + 5, rect.top + 5),
-        Offset(rect.center.dx, rect.center.dy),
-        paint,
-      );
-      if (hpPct < 0.4) {
+      paint.strokeCap = StrokeCap.round;
+      for (int i = 0; i < 2; i++) {
+        final x = rect.left + unit * (0.32 + i * 0.34);
+        final lift = unit * (0.12 + (sin(phase * 1.8 + i * 2) + 1) * 0.07);
+        paint
+          ..strokeWidth = unit * 0.13
+          ..color = const Color(0xDDF08D49);
         canvas.drawLine(
-          Offset(rect.center.dx, rect.center.dy),
-          Offset(rect.right - 4, rect.bottom - 4),
+          Offset(x, rect.top + unit * 0.24),
+          Offset(x + unit * 0.04, rect.top + unit * 0.24 - lift),
+          paint,
+        );
+        paint
+          ..strokeWidth = unit * 0.055
+          ..color = const Color(0xFFF9D38B);
+        canvas.drawLine(
+          Offset(x, rect.top + unit * 0.24),
+          Offset(x, rect.top + unit * 0.13),
           paint,
         );
       }
+      paint.strokeCap = StrokeCap.butt;
     }
+    if (poisoned) {
+      paint.style = PaintingStyle.fill;
+      for (int i = 0; i < 2; i++) {
+        final drift = (time * 0.5 + i * 0.47 + (row % 3) * 0.13) % 1;
+        paint.color = const Color(0xFFACCA77)
+            .withValues(alpha: (1 - drift) * 0.7);
+        canvas.drawCircle(
+          Offset(
+            rect.left + unit * (0.3 + i * 0.35),
+            rect.bottom - unit * (0.15 + drift * 0.5),
+          ),
+          unit * 0.07,
+          paint,
+        );
+      }
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.5, unit * 0.04)
+        ..color = const Color(0xAA9D81B9);
+      canvas.drawLine(
+        rect.bottomLeft + Offset(unit * 0.15, -unit * 0.1),
+        rect.bottomRight + Offset(-unit * 0.15, -unit * 0.1),
+        paint,
+      );
+    }
+    if (shocked && sin(phase * 3) > -0.35) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.7, unit * 0.07)
+        ..color = const Color(0xFFF6DF9A);
+      final center = rect.center;
+      canvas.drawLine(
+        center + Offset(-unit * 0.16, -unit * 0.28),
+        center + Offset(unit * 0.08, -unit * 0.02),
+        paint,
+      );
+      canvas.drawLine(
+        center + Offset(unit * 0.08, -unit * 0.02),
+        center + Offset(-unit * 0.08, unit * 0.04),
+        paint,
+      );
+      canvas.drawLine(
+        center + Offset(-unit * 0.08, unit * 0.04),
+        center + Offset(unit * 0.18, unit * 0.27),
+        paint,
+      );
+    }
+    if ((health?.hpPercent ?? 1) < 0.65) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.5, unit * 0.045)
+        ..color = const Color(0xAA0C1726);
+      canvas.drawLine(
+        rect.center + Offset(-unit * 0.2, -unit * 0.15),
+        rect.center,
+        paint,
+      );
+      canvas.drawLine(
+        rect.center,
+        rect.center + Offset(-unit * 0.06, unit * 0.27),
+        paint,
+      );
+    }
+    paint.style = PaintingStyle.fill;
   }
 }
 
@@ -278,9 +287,7 @@ class PlayerBall extends GameEntity {
       final tProgress = 1.0 - (i / trail.length);
       final tAlpha = tProgress * 0.35;
       final tRadius = radius * (0.4 + 0.6 * tProgress);
-      final trailPaint = Paint()
-        ..color = role.themeColor.withOpacity(tAlpha)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+      final trailPaint = Paint()..color = role.themeColor.withOpacity(tAlpha);
       canvas.drawCircle(tPos, tRadius, trailPaint);
     }
 
@@ -417,7 +424,7 @@ enum DropType { gold, exp }
 
 class DropItem extends GameEntity {
   final DropType type;
-  final double value;
+  double value;
   double lifeTime = 15.0;
 
   DropItem({
@@ -591,10 +598,33 @@ class MistZone {
   }
 
   void draw(Canvas canvas, Paint paint) {
-    final cloudPaint = Paint()
-      ..color = Colors.blueGrey.withOpacity(0.28)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15);
-    canvas.drawCircle(center, radius, cloudPaint);
+    final fade = (duration / 0.7).clamp(0.0, 1.0);
+    paint
+      ..style = PaintingStyle.fill
+      ..color = const Color(0xFFBFCDD2).withValues(alpha: fade * 0.09);
+    for (int i = 0; i < 3; i++) {
+      final drift = sin(duration * 1.2 + i * 2) * radius * 0.12;
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: center + Offset(drift, (i - 1) * radius * 0.2),
+          width: radius * (1.5 - i * 0.15),
+          height: radius * 0.75,
+        ),
+        paint,
+      );
+    }
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = const Color(0xFFCCE4E6).withValues(alpha: fade * 0.25);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius * 0.8),
+      duration * 0.4,
+      2.4,
+      false,
+      paint,
+    );
+    paint.style = PaintingStyle.fill;
   }
 }
 
@@ -642,16 +672,12 @@ class OrbitingSpirit {
     for (int i = trail.length - 1; i >= 0; i--) {
       final tPos = trail[i];
       final prog = 1.0 - (i / trail.length);
-      final trailPaint = Paint()
-        ..color = color.withOpacity(prog * 0.35)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+      final trailPaint = Paint()..color = color.withOpacity(prog * 0.35);
       canvas.drawCircle(tPos, size * (0.4 + prog * 0.5), trailPaint);
     }
 
     // Hào quang tinh linh
-    final glowPaint = Paint()
-      ..color = color.withOpacity(0.55)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    final glowPaint = Paint()..color = color.withOpacity(0.55);
     canvas.drawCircle(pos, size * 1.6, glowPaint);
 
     // Lõi tinh linh phát sáng
@@ -670,6 +696,7 @@ class OrbitingSpirit {
 class LightningArc {
   final List<Offset> points;
   final Color color;
+  late final Path _path = Path()..addPolygon(points, false);
   double lifeTime;
   final double maxLife;
 
@@ -687,24 +714,22 @@ class LightningArc {
   void draw(Canvas canvas, Paint paint) {
     if (points.length < 2) return;
     final alpha = (lifeTime / maxLife).clamp(0.0, 1.0);
-
-    // Đường hào quang sét
-    final glowPaint = Paint()
-      ..color = color.withOpacity(alpha * 0.75)
-      ..strokeWidth = 4.0
+    paint
+      ..shader = null
+      ..maskFilter = null
+      ..style = PaintingStyle.stroke
+      ..strokeJoin = StrokeJoin.round
       ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-
-    // Đường lõi sét trắng sáng
-    final corePaint = Paint()
-      ..color = Colors.white.withOpacity(alpha)
-      ..strokeWidth = 1.6
-      ..strokeCap = StrokeCap.round;
-
-    for (int i = 0; i < points.length - 1; i++) {
-      canvas.drawLine(points[i], points[i + 1], glowPaint);
-      canvas.drawLine(points[i], points[i + 1], corePaint);
-    }
+      ..strokeWidth = 3.0
+      ..color = color.withValues(alpha: alpha * 0.35);
+    canvas.drawPath(_path, paint);
+    paint
+      ..strokeWidth = 1.1
+      ..color = const Color(0xFFFFF1CE).withValues(alpha: alpha * 0.95);
+    canvas.drawPath(_path, paint);
+    paint
+      ..strokeCap = StrokeCap.butt
+      ..style = PaintingStyle.fill;
   }
 
   static LightningArc createZigzag(Offset start, Offset end, Color color) {
