@@ -18,10 +18,27 @@ class MemeLevel {
   });
 
   static List<MemeLevel> get allLevels => [
-        _createDogeLevel(),
-        _createPepeLevel(),
-        _createPopcatLevel(),
-      ];
+    _finePixels(_createDogeLevel()),
+    _finePixels(_createPepeLevel()),
+    _finePixels(_createPopcatLevel()),
+  ];
+
+  // Each artwork pixel becomes four independently breakable tiles.
+  // Preserve the original palette exactly in the revealed image.
+  static MemeLevel _finePixels(MemeLevel source) => MemeLevel(
+    id: source.id,
+    title: source.title,
+    memeName: source.memeName,
+    cols: source.cols * 2,
+    rows: source.rows * 2,
+    colorGrid: List.generate(
+      source.rows * 2,
+      (row) => List.generate(
+        source.cols * 2,
+        (col) => source.colorGrid[row ~/ 2][col ~/ 2],
+      ),
+    ),
+  );
 
   /// Level 1: Doge Pixel Meme (14x14 Chunky Grid)
   static MemeLevel _createDogeLevel() {
@@ -33,19 +50,19 @@ class MemeLevel {
     const t = Color(0xFF5D9CEC); // Sky Blue
 
     final grid = [
-      [t, t, t, y, y, t, t, t, y, y, t, t, t, t],
-      [t, t, y, y, y, y, t, y, y, y, y, t, t, t],
-      [t, y, y, y, y, y, y, y, y, y, y, y, t, t],
-      [t, y, y, b, y, y, y, y, y, b, y, y, t, t],
-      [y, y, y, b, y, y, y, y, y, b, y, y, y, t],
-      [y, y, y, y, y, w, w, w, y, y, y, y, y, t],
-      [y, y, y, y, w, b, b, b, w, y, y, y, y, t],
-      [y, y, y, y, w, w, b, w, w, y, y, y, y, t],
-      [t, y, y, y, y, w, r, w, y, y, y, y, t, t],
-      [t, y, y, y, y, w, w, w, y, y, y, y, t, t],
-      [t, t, y, y, y, y, y, y, y, y, y, t, t, t],
-      [t, t, t, y, y, y, y, y, y, y, t, t, t, t],
-      [g, g, g, g, y, y, y, y, y, g, g, g, g, g],
+      [t, t, t, y, y, t, t, t, t, y, y, t, t, t],
+      [t, t, y, y, y, y, t, t, y, y, y, y, t, t],
+      [t, y, y, y, y, y, y, y, y, y, y, y, y, t],
+      [t, y, y, b, y, y, y, y, y, y, b, y, y, t],
+      [t, y, y, b, y, y, y, y, y, y, b, y, y, t],
+      [t, y, y, y, w, w, w, w, w, w, y, y, y, t],
+      [t, y, y, y, w, w, b, b, w, w, y, y, y, t],
+      [t, y, y, y, w, w, b, b, w, w, y, y, y, t],
+      [t, y, y, y, y, w, r, r, w, y, y, y, y, t],
+      [t, y, y, y, y, w, w, w, w, y, y, y, y, t],
+      [t, t, y, y, y, y, y, y, y, y, y, y, t, t],
+      [t, t, t, y, y, y, y, y, y, y, y, t, t, t],
+      [g, g, g, g, y, y, y, y, y, y, g, g, g, g],
       [g, g, g, g, g, g, g, g, g, g, g, g, g, g],
     ];
 
@@ -81,8 +98,38 @@ class MemeLevel {
       [s, k, k, d, d, d, d, d, d, d, d, k, k, s],
       [s, s, k, k, k, k, k, k, k, k, k, k, s, s],
       [s, s, s, k, k, k, k, k, k, k, k, s, s, s],
-      [s, s, s, Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), s, s, s],
-      [s, s, Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), Color(0xFF1F5C8B), s, s],
+      [
+        s,
+        s,
+        s,
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        s,
+        s,
+        s,
+      ],
+      [
+        s,
+        s,
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        Color(0xFF1F5C8B),
+        s,
+        s,
+      ],
     ];
 
     return MemeLevel(

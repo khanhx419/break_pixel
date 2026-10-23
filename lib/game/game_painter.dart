@@ -1,5 +1,7 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+
 import '../models/character.dart';
 import 'game_engine.dart';
 
@@ -21,6 +23,15 @@ class GamePainter extends CustomPainter {
     // 1. Vẽ nền không gian Arena phong cách viễn tưởng
     _drawBackground(canvas, size, paint);
 
+    canvas.save();
+    canvas.clipRect(
+      Rect.fromLTWH(
+        engine.gridStartX,
+        engine.gridStartY,
+        engine.level.cols * engine.gridBlockSize,
+        engine.level.rows * engine.gridBlockSize,
+      ),
+    );
     // 2. Vẽ các vùng Sương mù (Mist Zones)
     for (final mist in engine.mistZones) {
       mist.draw(canvas, paint);
@@ -58,9 +69,18 @@ class GamePainter extends CustomPainter {
     // 9. Vẽ Quả cầu Nhân vật 3D (Player Ball)
     engine.player.draw(canvas, paint);
 
+    // 9.1 Vẽ Vòng xoáy Bão Lửa (Firestorm Vortex) nếu đang kích hoạt
+    if (engine.isFirestormActive) {
+      _drawFirestormVortex(canvas, paint);
+    }
+
     // 10. Vẽ Tinh Linh Hộ Vệ bay xoay quanh bóng (Orbiting Spirits)
     for (final spirit in engine.spirits) {
       spirit.draw(canvas, paint, engine.player.transform.position);
+    }
+
+    for (final vortex in engine.vortexZones) {
+      vortex.draw(canvas);
     }
 
     // 11. Vẽ Tia sét giật chuỗi chân thực (Lightning Arcs)
@@ -74,6 +94,7 @@ class GamePainter extends CustomPainter {
     }
 
     // 13. Vẽ Chữ số sát thương & text trạng thái bay lên
+    canvas.restore();
     _drawFloatingTexts(canvas);
 
     canvas.restore();
@@ -86,7 +107,9 @@ class GamePainter extends CustomPainter {
       end: Alignment.bottomCenter,
       colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
     );
-    paint.shader = bgGradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    paint.shader = bgGradient.createShader(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+    );
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
     paint.shader = null;
 
@@ -103,7 +126,12 @@ class GamePainter extends CustomPainter {
     // Khung viền thế giới Pixel mà người chơi cần phá vỡ để thoát ra
     final gridWidth = engine.level.cols * engine.gridBlockSize;
     final gridHeight = engine.level.rows * engine.gridBlockSize;
-    final worldRect = Rect.fromLTWH(engine.gridStartX, engine.gridStartY, gridWidth, gridHeight);
+    final worldRect = Rect.fromLTWH(
+      engine.gridStartX,
+      engine.gridStartY,
+      gridWidth,
+      gridHeight,
+    );
 
     // Nền tối phía sau bức tranh
     paint.color = const Color(0xFF0C1322);
@@ -154,8 +182,11 @@ class GamePainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
           ..strokeWidth = 1.5 + t * 4.5
-          ..color = Color.lerp(player.role.themeColor, Colors.white, t * 0.7)!
-              .withOpacity(t * 0.6);
+          ..color = Color.lerp(
+            player.role.themeColor,
+            Colors.white,
+            t * 0.7,
+          )!.withOpacity(t * 0.6);
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: range * 0.88),
           segStart,
@@ -181,7 +212,7 @@ class GamePainter extends CustomPainter {
         break;
       case RoleType.farmer:
         // Liềm gặt mùa màng
-        _drawScythe(canvas, paint, range);
+        _drawRake(canvas, paint, range);
         break;
       case RoleType.lumberjack:
         // Rìu đốn củi hạng nặng
@@ -240,28 +271,23 @@ class GamePainter extends CustomPainter {
     canvas.drawLine(const Offset(18, -18), const Offset(18, 18), paint);
   }
 
-  void _drawScythe(Canvas canvas, Paint paint, double range) {
-    // Cán liềm gỗ
-    paint.color = Colors.brown.shade400;
-    paint.strokeWidth = 2.5;
-    paint.style = PaintingStyle.stroke;
-    canvas.drawLine(Offset.zero, Offset(range * 0.75, 0), paint);
-
-    // Lưỡi liềm vàng gặt lúa hình trăng khuyết
-    final scythePath = Path()
-      ..moveTo(range * 0.7, -2)
-      ..quadraticBezierTo(range * 0.9, -16, range * 0.6, -26)
-      ..quadraticBezierTo(range * 0.82, -14, range * 0.7, 2)
-      ..close();
-
-    paint.color = Colors.amber;
-    paint.style = PaintingStyle.fill;
-    canvas.drawPath(scythePath, paint);
-
-    paint.color = Colors.white;
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 1.0;
-    canvas.drawPath(scythePath, paint);
+  void _drawRake(Canvas canvas, Paint paint, double range) {
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 3
+      ..color = Colors.brown.shade400;
+    canvas.drawLine(Offset.zero, Offset(range - 8, 0), paint);
+    paint.color = Colors.blueGrey.shade100;
+    canvas.drawLine(Offset(range - 8, -12), Offset(range - 8, 12), paint);
+    for (int i = -2; i <= 2; i++) {
+      canvas.drawLine(
+        Offset(range - 8, i * 6.0),
+        Offset(range, i * 6.0),
+        paint,
+      );
+    }
+    paint.strokeCap = StrokeCap.butt;
   }
 
   void _drawAxe(Canvas canvas, Paint paint, double range) {
@@ -325,6 +351,38 @@ class GamePainter extends CustomPainter {
       textPainter.paint(
         canvas,
         Offset(textItem.x - textPainter.width / 2, textItem.y),
+      );
+    }
+  }
+
+  void _drawFirestormVortex(Canvas canvas, Paint paint) {
+    final center = engine.player.transform.position;
+    final r = engine.player.radius;
+    final time = DateTime.now().millisecondsSinceEpoch / 1000.0;
+
+    // Vầng hào quang lửa lan tỏa
+    final vortexPaint = Paint()
+      ..color = Colors.deepOrangeAccent.withOpacity(0.35)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
+    canvas.drawCircle(center, r + 24, vortexPaint);
+
+    // Cung lốc xoáy lửa cuộn tròn quanh bóng
+    const arms = 4;
+    for (int i = 0; i < arms; i++) {
+      final angle = time * 6.0 + i * (2 * pi / arms);
+      final armPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.2
+        ..strokeCap = StrokeCap.round
+        ..color = (i % 2 == 0 ? Colors.amberAccent : Colors.deepOrange)
+            .withOpacity(0.85);
+
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: r + 14 + (i * 3)),
+        angle,
+        0.8,
+        false,
+        armPaint,
       );
     }
   }

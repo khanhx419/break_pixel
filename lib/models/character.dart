@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 
 enum RoleType {
-  warrior,    // Chiến binh: Kiếm xoay chém diện rộng
-  archer,     // Cung thủ: Cung xoay bắn tên tầm xa
-  farmer,     // Nông dân: Liềm gặt quét cung, bội thu vàng/exp
+  warrior, // Chiến binh: Kiếm xoay chém diện rộng
+  archer, // Cung thủ: Cung xoay bắn tên tầm xa
+  farmer, // Nông dân: Liềm gặt quét cung, bội thu vàng/exp
   lumberjack, // Tiều phu: Rìu bổ nặng, phá khối cứng cực mạnh
-  fisherman,  // Người đánh cá: Cần câu & Lao cá, kéo dồn pixel & sóng nước
+  fisherman, // Người đánh cá: Cần câu & Lao cá, kéo dồn pixel & sóng nước
 }
 
 enum RaceType {
-  human,      // Người: Cân bằng, +15% EXP
-  elf,        // Elf: Tốc độ vũ khí +25%, buff hệ Phong
-  orc,        // Orc: Sát thương va chạm +40%
-  dwarf,      // Người lùn: Giảm 25% giá lò rèn, +30% vàng rơi
-  merfolk,    // Người cá: Nảy lướt trơn tru, làm ẩm pixel (combo Thủy/Lôi)
-  yeti,       // Yeti (Người tuyết): Khối lượng nặng, bóng to +25%, Frost Aura làm đông cứng & giòn pixel
+  human, // Người: Cân bằng, +15% EXP
+  elf, // Elf: Tốc độ vũ khí +25%, buff hệ Phong
+  orc, // Orc: Sát thương va chạm +40%
+  dwarf, // Người lùn: Giảm 25% giá lò rèn, +30% vàng rơi
+  merfolk, // Người cá: Nảy lướt trơn tru, làm ẩm pixel (combo Thủy/Lôi)
+  yeti, // Yeti (Người tuyết): Khối lượng nặng, bóng to +25%, Frost Aura làm đông cứng & giòn pixel
 }
 
 class RoleInfo {
@@ -66,8 +66,8 @@ class RoleInfo {
     RoleInfo(
       type: RoleType.farmer,
       name: 'Nông Dân',
-      description: 'Vung liềm gặt quét theo vòng cung rộng. Nội tại "Bội Thu" tăng 25% Vàng và EXP thu hoạch.',
-      weaponName: 'Liềm Gặt Mùa Màng',
+      description: 'Vung cào cỏ quét theo vòng cung rộng. Nội tại "Bội Thu" tăng 25% Vàng và EXP thu hoạch.',
+      weaponName: 'Cào Cỏ Mùa Màng',
       icon: Icons.agriculture,
       themeColor: Colors.orangeAccent,
       baseDamage: 10.0,
@@ -136,7 +136,8 @@ class RaceInfo {
     RaceInfo(
       type: RaceType.human,
       name: 'Người (Human)',
-      description: 'Cân bằng mọi chỉ số, thích nghi nhanh chóng với thế giới mới.',
+      description:
+          'Cân bằng mọi chỉ số, thích nghi nhanh chóng với thế giới mới.',
       passiveName: 'Toàn Diện (+10% Stats, +15% EXP)',
       icon: Icons.person,
       themeColor: Colors.blueAccent,

@@ -1,5 +1,7 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+
 import 'ecs.dart';
 import 'character.dart';
 
@@ -24,19 +26,30 @@ class PixelBlock extends GameEntity {
     this.isCenterEmpty = false,
   });
 
+  bool takeDamage(double damage) {
+    if (elementAffinity?.isFrozen ?? false) damage *= 1.5;
+    if ((elementAffinity?.shockTimer ?? 0) > 0) damage *= 1.25;
+    return health!.takeDamage(damage);
+  }
+
   @override
   void update(double dt) {
     if (hitFlashTimer > 0) hitFlashTimer -= dt;
-    elementAffinity?.update(dt);
+
     // Sát thương theo thời gian từ Lửa (Burn) hoặc Độc (Poison)
     if (elementAffinity != null) {
       if (elementAffinity!.burnTimer > 0) {
-        health?.takeDamage(elementAffinity!.burnDps * dt);
+        takeDamage(
+          elementAffinity!.burnDps * min(dt, elementAffinity!.burnTimer),
+        );
       }
       if (elementAffinity!.poisonTimer > 0) {
-        health?.takeDamage(elementAffinity!.poisonDps * dt);
+        takeDamage(
+          elementAffinity!.poisonDps * min(dt, elementAffinity!.poisonTimer),
+        );
       }
     }
+    elementAffinity?.update(dt);
   }
 
   @override
@@ -44,7 +57,10 @@ class PixelBlock extends GameEntity {
     if (health?.isDestroyed ?? false) return;
 
     final rect = transform.rect;
-    final r = RRect.fromRectAndRadius(rect.deflate(1.5), const Radius.circular(3));
+    final r = RRect.fromRectAndRadius(
+      rect.deflate(0.5),
+      const Radius.circular(1),
+    );
 
     // Hiệu ứng chớp sáng trắng khi bị đánh trúng (Hit Flash)
     if (hitFlashTimer > 0) {
@@ -68,8 +84,16 @@ class PixelBlock extends GameEntity {
       const s = 5.0;
       canvas.drawLine(Offset(cx - s, cy), Offset(cx + s, cy), paint);
       canvas.drawLine(Offset(cx, cy - s), Offset(cx, cy + s), paint);
-      canvas.drawLine(Offset(cx - s * 0.7, cy - s * 0.7), Offset(cx + s * 0.7, cy + s * 0.7), paint);
-      canvas.drawLine(Offset(cx - s * 0.7, cy + s * 0.7), Offset(cx + s * 0.7, cy - s * 0.7), paint);
+      canvas.drawLine(
+        Offset(cx - s * 0.7, cy - s * 0.7),
+        Offset(cx + s * 0.7, cy + s * 0.7),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(cx - s * 0.7, cy + s * 0.7),
+        Offset(cx + s * 0.7, cy - s * 0.7),
+        paint,
+      );
       // Viền băng lấp lánh
       paint.color = Colors.cyanAccent;
       paint.strokeWidth = 1.5;
@@ -102,16 +126,25 @@ class PixelBlock extends GameEntity {
     }
 
     // 3. Nếu đang bị nhiễm độc (Poison)
-    if (elementAffinity?.poisonTimer != null && elementAffinity!.poisonTimer > 0) {
+    if (elementAffinity?.poisonTimer != null &&
+        elementAffinity!.poisonTimer > 0) {
       paint.color = const Color(0xFF16A34A);
       paint.style = PaintingStyle.fill;
       canvas.drawRRect(r, paint);
       // Bong bóng độc xanh lục / tím
       paint.color = Colors.purpleAccent.withOpacity(0.8);
       paint.style = PaintingStyle.fill;
-      canvas.drawCircle(Offset(rect.center.dx - 3, rect.center.dy - 2), 3.0, paint);
+      canvas.drawCircle(
+        Offset(rect.center.dx - 3, rect.center.dy - 2),
+        3.0,
+        paint,
+      );
       paint.color = Colors.greenAccent;
-      canvas.drawCircle(Offset(rect.center.dx + 4, rect.center.dy + 3), 2.2, paint);
+      canvas.drawCircle(
+        Offset(rect.center.dx + 4, rect.center.dy + 3),
+        2.2,
+        paint,
+      );
       // Viền độc tím
       paint.color = Colors.purpleAccent;
       paint.style = PaintingStyle.stroke;
@@ -121,7 +154,8 @@ class PixelBlock extends GameEntity {
     }
 
     // 4. Nếu đang bị nhiễm điện / giật sét (Shock)
-    if (elementAffinity?.shockTimer != null && elementAffinity!.shockTimer > 0) {
+    if (elementAffinity?.shockTimer != null &&
+        elementAffinity!.shockTimer > 0) {
       paint.color = const Color(0xFFFBBF24);
       paint.style = PaintingStyle.fill;
       canvas.drawRRect(r, paint);
@@ -148,12 +182,28 @@ class PixelBlock extends GameEntity {
     paint.style = PaintingStyle.stroke;
     paint.strokeWidth = 1.2;
     paint.color = const Color(0xFF475569); // Cạnh trên & trái sáng
-    canvas.drawLine(Offset(rect.left + 2, rect.bottom - 2), Offset(rect.left + 2, rect.top + 2), paint);
-    canvas.drawLine(Offset(rect.left + 2, rect.top + 2), Offset(rect.right - 2, rect.top + 2), paint);
+    canvas.drawLine(
+      Offset(rect.left + 2, rect.bottom - 2),
+      Offset(rect.left + 2, rect.top + 2),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(rect.left + 2, rect.top + 2),
+      Offset(rect.right - 2, rect.top + 2),
+      paint,
+    );
 
     paint.color = const Color(0xFF1E2633); // Cạnh dưới & phải tối
-    canvas.drawLine(Offset(rect.right - 2, rect.top + 2), Offset(rect.right - 2, rect.bottom - 2), paint);
-    canvas.drawLine(Offset(rect.left + 2, rect.bottom - 2), Offset(rect.right - 2, rect.bottom - 2), paint);
+    canvas.drawLine(
+      Offset(rect.right - 2, rect.top + 2),
+      Offset(rect.right - 2, rect.bottom - 2),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(rect.left + 2, rect.bottom - 2),
+      Offset(rect.right - 2, rect.bottom - 2),
+      paint,
+    );
 
     // Vẽ vết nứt vỡ khi bị mất máu
     if (hpPct < 0.75) {
@@ -211,7 +261,8 @@ class PlayerBall extends GameEntity {
 
     // Xoay vũ khí (nhân thêm hệ số xoay cuồng nộ)
     final speedMultiplier = race.speedMultiplier;
-    weaponAngle += (role.attackSpeed * speedMultiplier * 4.5 * spinMultiplier) * dt;
+    weaponAngle +=
+        (role.attackSpeed * speedMultiplier * 4.5 * spinMultiplier) * dt;
     if (weaponAngle > 2 * pi) weaponAngle -= 2 * pi;
 
     if (attackCooldown > 0) attackCooldown -= dt;
@@ -270,6 +321,7 @@ class PlayerBall extends GameEntity {
 /// Mũi tên của Cung thủ
 class ArrowEntity extends GameEntity {
   final double damage;
+  final Set<String> hitBlocks = {};
   int pierceCount;
   double lifeTime;
 
@@ -316,7 +368,9 @@ class HookEntity extends GameEntity {
   final double damage;
   double distanceTravelled = 0.0;
   bool isReturning = false;
-  final Offset origin;
+  Offset origin;
+  final Set<String> outboundHits = {};
+  final Set<String> returnHits = {};
 
   HookEntity({
     required super.id,
@@ -337,8 +391,8 @@ class HookEntity extends GameEntity {
       final dy = origin.dy - transform.y;
       final dist = sqrt(dx * dx + dy * dy);
       if (dist > 5) {
-        transform.x += (dx / dist) * 450 * dt;
-        transform.y += (dy / dist) * 450 * dt;
+        transform.x += (dx / dist) * min(dist, 450 * dt);
+        transform.y += (dy / dist) * min(dist, 450 * dt);
       }
     }
   }
@@ -484,7 +538,10 @@ class PixelDebris {
       canvas.drawCircle(Offset.zero, size * 0.8, paint);
       paint.maskFilter = null;
     } else {
-      canvas.drawRect(Rect.fromCenter(center: Offset.zero, width: size, height: size), paint);
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset.zero, width: size, height: size),
+        paint,
+      );
     }
     canvas.restore();
   }
@@ -666,10 +723,38 @@ class LightningArc {
       final perpX = -(end.dy - start.dy) / (dist > 0 ? dist : 1);
       final perpY = (end.dx - start.dx) / (dist > 0 ? dist : 1);
       final offsetDist = (rng.nextDouble() - 0.5) * 16.0;
-      pts.add(Offset(interp.dx + perpX * offsetDist, interp.dy + perpY * offsetDist));
+      pts.add(
+        Offset(interp.dx + perpX * offsetDist, interp.dy + perpY * offsetDist),
+      );
     }
     pts.add(end);
     return LightningArc(points: pts, color: color);
   }
 }
 
+/// A persistent lightning field; tiles stay aligned with their hidden artwork.
+class VoidVortexZone {
+  final Offset center;
+  double life = 2.5;
+  double pulse = 0.5;
+
+  VoidVortexZone(this.center);
+
+  void draw(Canvas canvas) {
+    final paint = Paint()..color = const Color(0xBB140B26);
+    canvas.drawCircle(center, 18, paint);
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = Colors.purpleAccent.withValues(alpha: (life / 2.5).clamp(0, 1));
+    for (int i = 0; i < 3; i++) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: 22.0 + i * 9),
+        life * 4 + i * 2,
+        1.6,
+        false,
+        paint,
+      );
+    }
+  }
+}

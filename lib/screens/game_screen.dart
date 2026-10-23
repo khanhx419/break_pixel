@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+
 import '../game/game_engine.dart';
 import '../game/game_painter.dart';
 import '../models/character.dart';
@@ -53,9 +54,6 @@ class _GameScreenState extends State<GameScreen>
     // Đăng ký callbacks
     _engine.onLevelUp = _showLevelUpDialog;
     _engine.onVictory = _showVictoryDialog;
-    _engine.onBlockDestroyedEffect = () {
-      AudioService.playBlockBreak();
-    };
 
     // Khởi tạo Game Loop Ticker
     _ticker = createTicker((elapsed) {
@@ -136,9 +134,8 @@ class _GameScreenState extends State<GameScreen>
           Navigator.of(context).pop();
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => CharacterSelectScreen(
-                isYetiUnlocked: _yetiUnlocked,
-              ),
+              builder: (context) =>
+                  CharacterSelectScreen(isYetiUnlocked: _yetiUnlocked),
             ),
           );
         },
@@ -184,7 +181,10 @@ class _GameScreenState extends State<GameScreen>
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final size = Size(constraints.maxWidth, constraints.maxHeight);
+                  final size = Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight,
+                  );
                   _engine.resize(size);
 
                   return GestureDetector(
@@ -221,13 +221,16 @@ class _GameScreenState extends State<GameScreen>
             children: [
               // Nút thoát về menu
               IconButton(
-                icon: const Icon(Icons.arrow_back_ios, color: Colors.white70, size: 20),
+                icon: const Icon(
+                  Icons.arrow_back_ios,
+                  color: Colors.white70,
+                  size: 20,
+                ),
                 onPressed: () {
                   Navigator.of(context).pushReplacement(
                     MaterialPageRoute(
-                      builder: (context) => CharacterSelectScreen(
-                        isYetiUnlocked: _yetiUnlocked,
-                      ),
+                      builder: (context) =>
+                          CharacterSelectScreen(isYetiUnlocked: _yetiUnlocked),
                     ),
                   );
                 },
@@ -282,7 +285,10 @@ class _GameScreenState extends State<GameScreen>
 
               // Vàng hiện có
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.black45,
                   borderRadius: BorderRadius.circular(16),
@@ -290,7 +296,11 @@ class _GameScreenState extends State<GameScreen>
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.monetization_on, color: Colors.amber, size: 18),
+                    const Icon(
+                      Icons.monetization_on,
+                      color: Colors.amber,
+                      size: 18,
+                    ),
                     const SizedBox(width: 4),
                     AnimatedBuilder(
                       animation: _engine,
@@ -334,7 +344,10 @@ class _GameScreenState extends State<GameScreen>
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
-                    value: (_engine.exp / _engine.expToNextLevel).clamp(0.0, 1.0),
+                    value: (_engine.exp / _engine.expToNextLevel).clamp(
+                      0.0,
+                      1.0,
+                    ),
                     backgroundColor: Colors.white10,
                     valueColor: const AlwaysStoppedAnimation<Color>(
                       Colors.purpleAccent,
@@ -369,7 +382,9 @@ class _GameScreenState extends State<GameScreen>
               backgroundColor: const Color(0xFF0F172A),
               foregroundColor: Colors.white,
               side: const BorderSide(color: Colors.amber, width: 1.2),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
           ),
@@ -389,7 +404,11 @@ class _GameScreenState extends State<GameScreen>
           // Nút Dung Hợp Nguyên Tố (Lab)
           ElevatedButton.icon(
             onPressed: _openFusionLabModal,
-            icon: const Icon(Icons.science, color: Colors.purpleAccent, size: 20),
+            icon: const Icon(
+              Icons.science,
+              color: Colors.purpleAccent,
+              size: 20,
+            ),
             label: Row(
               children: [
                 const Text(
@@ -412,7 +431,9 @@ class _GameScreenState extends State<GameScreen>
               backgroundColor: const Color(0xFF0F172A),
               foregroundColor: Colors.white,
               side: const BorderSide(color: Colors.purpleAccent, width: 1.2),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
           ),

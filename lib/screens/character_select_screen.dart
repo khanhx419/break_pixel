@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/character.dart';
-import '../models/pixel_art_data.dart';
 import 'game_screen.dart';
 
 class CharacterSelectScreen extends StatefulWidget {
