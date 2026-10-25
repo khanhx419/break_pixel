@@ -7,6 +7,7 @@ import '../models/character.dart';
 import '../models/element.dart';
 import '../models/pixel_art_data.dart';
 import '../models/game_entities.dart';
+import '../models/upgrade.dart';
 import '../core/audio_service.dart';
 import '../core/bounded_list.dart';
 
@@ -34,7 +35,7 @@ class GameEngine extends ChangeNotifier {
   double get cameraScale => 1 + _cameraSettle * 0.06;
   final ValueNotifier<int> hudRevision = ValueNotifier(0);
   double _hudTimer = 0;
-  final Random _random = Random();
+  final Random _random;
   double _hitSoundCooldown = 0;
   double _breakSoundCooldown = 0;
   double _coinSoundCooldown = 0;
@@ -59,6 +60,8 @@ class GameEngine extends ChangeNotifier {
 
   // Hệ thống nguyên tố sở hữu
   final Set<ElementType> ownedElements = {};
+  final Set<ElementType> equippedElements = {};
+  static const maxEquippedElements = 3;
   final Set<ElementType> activeFusions = {};
 
   // Kinh tế & Tiến trình
@@ -79,6 +82,12 @@ class GameEngine extends ChangeNotifier {
   int magnetUpgradeLevel = 0;
   int spinUpgradeLevel = 0;
   int spiritUpgradeLevel = 0;
+  int resonanceUpgradeLevel = 0;
+  double dashCooldown = 0;
+  double? projectileAimAngle;
+  double _impactCooldown = 0;
+  static const maxImpacts = 32;
+  final List<ElementImpact> impacts = BoundedList(maxImpacts);
 
   // Cooldown cho các hiệu ứng nguyên tố (tránh spam quá nhiều)
   double _fireBurstCooldown = 0.0;
@@ -93,20 +102,24 @@ class GameEngine extends ChangeNotifier {
   double _lavaBurstCooldown = 0.0;
 
   double get weaponSpinSpeedMultiplier =>
-      (1.0 + spinUpgradeLevel * 0.4) *
-      (ownedElements.contains(ElementType.wind) ? 1.25 : 1.0);
+      (1.0 + min(spinUpgradeLevel, 8) * 0.18) *
+      (equippedElements.contains(ElementType.wind)
+          ? (race.type == RaceType.elf ? 1.35 : 1.25)
+          : 1.0);
 
   final Map<String, double> _elementHitTimers = {};
   double _mistCooldown = 0;
   bool get isFirestormActive => _firestormTimer > 0;
 
   // Lực hút nam châm cơ bản
-  double get magnetRange => 80.0 + (magnetUpgradeLevel * 25.0);
+  double get magnetRange => 80.0 + (min(magnetUpgradeLevel, 6) * 22.0);
 
   // Sát thương tổng thể
   double get totalDamage {
     final base =
-        (role.baseDamage + damageUpgradeLevel * 4.0) * race.damageMultiplier;
+        role.baseDamage *
+        (1 + min(damageUpgradeLevel, 15) * 0.12) *
+        race.damageMultiplier;
     return base * (isEndless ? 1 + log(endlessWave) * 0.18 : 1);
   }
 
@@ -114,13 +127,20 @@ class GameEngine extends ChangeNotifier {
   double get totalAttackSpeed {
     return role.attackSpeed *
         race.speedMultiplier *
-        (1.0 + speedUpgradeLevel * 0.15);
+        (1.0 + min(speedUpgradeLevel, 8) * 0.12);
   }
 
   // Tầm với vũ khí
   double get totalWeaponRange {
-    return (role.weaponRange + rangeUpgradeLevel * 8.0);
+    return (role.weaponRange + min(rangeUpgradeLevel, 6) * 6.0);
   }
+
+  double get normalBallSpeed =>
+      160 * (1 + race.bounceBonus + min(bounceUpgradeLevel, 6) * 0.08);
+  double get elementPower => 1 + min(resonanceUpgradeLevel, 6) * 0.1;
+  double get elementDamage => totalDamage * elementPower;
+  double get meleeTempo =>
+      race.speedMultiplier * (1 + min(speedUpgradeLevel, 8) * 0.12);
 
   // Callbacks
   VoidCallback? onLevelUp;
@@ -132,7 +152,8 @@ class GameEngine extends ChangeNotifier {
     required this.race,
     required this.level,
     this.isEndless = false,
-  }) {
+    int? randomSeed,
+  }) : _random = Random(randomSeed) {
     if (isEndless) level = MemeLevel.endlessWave(endlessWave);
     _initEngine();
   }
@@ -145,7 +166,7 @@ class GameEngine extends ChangeNotifier {
 
   void _initEngine() {
     // Tốc độ nảy cơ bản
-    double speed = 160.0 * (1.0 + race.bounceBonus + bounceUpgradeLevel * 0.1);
+    double speed = normalBallSpeed;
     final randomAngle = _random.nextDouble() * 2 * pi; // Bất kỳ góc nào 360 độ
     final vx = speed * cos(randomAngle);
     final vy = speed * sin(randomAngle);
@@ -211,7 +232,36 @@ class GameEngine extends ChangeNotifier {
           newCenter + offsetFromCenter * (gridWidth / oldWidth);
       player.radius =
           blockSize *
-          (isEndless ? min(0.48, 0.32 + (endlessWave - 1) * 0.015) : 0.32);
+          (isEndless ? min(0.43, 0.32 + (endlessWave - 1) * 0.012) : 0.32) *
+          (1 + race.ballSizeBonus);
+
+      final scale = gridWidth / oldWidth;
+      Offset remap(Offset position) =>
+          newCenter + (position - oldCenter) * scale;
+      for (final entity in [...arrows, ...hooks, ...drops]) {
+        entity.transform.position = remap(entity.transform.position);
+      }
+      for (final hook in hooks) {
+        hook.origin = player.transform.position;
+      }
+      for (final mist in mistZones) {
+        mist.center = remap(mist.center);
+      }
+      for (final vortex in vortexZones) {
+        vortex.center = remap(vortex.center);
+      }
+      player.trail.clear();
+      for (final spirit in spirits) {
+        spirit.trail.clear();
+      }
+      for (final arrow in arrows) {
+        arrow.trail.clear();
+      }
+      impacts.clear();
+      debris.clear();
+      lightningArcs.clear();
+      shockwaves.clear();
+      floatingTexts.clear();
 
       for (final block in blocks) {
         block.transform.x = gridStartX + block.col * blockSize + blockSize / 2;
@@ -253,7 +303,8 @@ class GameEngine extends ChangeNotifier {
     player.transform.y = gridCenterY;
     player.radius =
         blockSize *
-        (isEndless ? min(0.48, 0.32 + (endlessWave - 1) * 0.015) : 0.32);
+        (isEndless ? min(0.43, 0.32 + (endlessWave - 1) * 0.012) : 0.32) *
+        (1 + race.ballSizeBonus);
 
     // Xác định 4 ô trống trung tâm (như ví dụ 2:2, 2:3, 3:2, 3:3)
     final centerCol1 = cols ~/ 2 - 1;
@@ -352,6 +403,9 @@ class GameEngine extends ChangeNotifier {
     _hudTimer += elapsed;
     _cameraSettle = max(0, _cameraSettle - elapsed * 1.5);
     _particlesThisFrame = 0;
+    dashCooldown = max(0, dashCooldown - elapsed);
+    _impactCooldown = max(0, _impactCooldown - elapsed);
+    impacts.removeWhere((effect) => effect.update(elapsed));
     _breakRingsThisFrame = 0;
     if (isExpanding) {
       _waveWait -= elapsed;
@@ -378,7 +432,10 @@ class GameEngine extends ChangeNotifier {
     floatingTexts.removeWhere((effect) => effect.update(dt));
   }
 
-  void _advanceEndlessWave() {
+  void _resetBoardState() {
+    dashCooldown = 0;
+    projectileAimAngle = null;
+    _impactCooldown = 0;
     // Collect outstanding rewards before replacing the board.
     for (final drop in drops) {
       if (drop.type == DropType.gold) {
@@ -397,6 +454,7 @@ class GameEngine extends ChangeNotifier {
     shockwaves.clear();
     lightningArcs.clear();
     _elementHitTimers.clear();
+    impacts.clear();
     _firestormTimer = 0;
     _fireBurstCooldown = _lightningCooldown = _mistCooldown = 0;
     _permafrostCooldown = _superconductorCooldown = _explosiveGasCooldown = 0;
@@ -409,6 +467,22 @@ class GameEngine extends ChangeNotifier {
     for (final spirit in spirits) {
       spirit.trail.clear();
     }
+  }
+
+  bool startStoryLevel(MemeLevel next) {
+    if (isEndless || !isLevelCompleted) return false;
+    _resetBoardState();
+    level = next;
+    isLevelCompleted = false;
+    _buildPixelGrid();
+    _cameraSettle = 1;
+    hudRevision.value++;
+    notifyListeners();
+    return true;
+  }
+
+  void _advanceEndlessWave() {
+    _resetBoardState();
     endlessWave++;
     level = MemeLevel.endlessWave(endlessWave);
     isLevelCompleted = false;
@@ -496,6 +570,14 @@ class GameEngine extends ChangeNotifier {
 
     // 1. Cập nhật Nhân vật (Vị trí & Góc vũ khí)
     player.spinMultiplier = weaponSpinSpeedMultiplier;
+    final velocity = Offset(player.transform.vx, player.transform.vy);
+    if (velocity.distance > normalBallSpeed + 0.1) {
+      final speed =
+          normalBallSpeed +
+          (velocity.distance - normalBallSpeed) * expDecay(dt);
+      player.transform.vx = velocity.dx / velocity.distance * speed;
+      player.transform.vy = velocity.dy / velocity.distance * speed;
+    }
     player.update(dt);
     _handleBallBorderCollision();
     _handleBallBlockCollision();
@@ -512,13 +594,13 @@ class GameEngine extends ChangeNotifier {
         if (b.transform.rect.inflate(spirit.size * 0.5).contains(sPos)) {
           _damageBlock(b, totalDamage * 0.8 * dt * 5.0, 'TINH LINH');
           if (spirit.element == ElementType.fire) {
-            b.elementAffinity?.applyFire(2.5, totalDamage * 0.25);
+            b.elementAffinity?.applyFire(2.5, elementDamage * 0.25);
           } else if (spirit.element == ElementType.frost) {
             b.elementAffinity?.applyFrost(3.0);
           } else if (spirit.element == ElementType.lightning) {
             b.elementAffinity?.applyShock(1.2);
           } else if (spirit.element == ElementType.poison) {
-            b.elementAffinity?.applyPoison(3.0, totalDamage * 0.2);
+            b.elementAffinity?.applyPoison(3.0, elementDamage * 0.2);
           }
         }
       }
@@ -667,10 +749,9 @@ class GameEngine extends ChangeNotifier {
         double collisionDmg =
             totalDamage *
             0.8 *
-            (ownedElements.contains(ElementType.earth) ? 1.2 : 1.0);
+            (equippedElements.contains(ElementType.earth) ? 1.2 : 1.0);
         if (race.type == RaceType.yeti) {
           block.elementAffinity?.applyFrost(3.0);
-          collisionDmg *= 1.35;
         }
         _damageBlock(block, collisionDmg, 'VA CHẠM');
         break; // Mỗi frame xử lý 1 va chạm chính
@@ -717,7 +798,7 @@ class GameEngine extends ChangeNotifier {
         _checkMeleeLineCollision(
           center,
           axeTip,
-          totalDamage * 1.6,
+          totalDamage * 1.25,
           dt,
           'BỔ RÌU',
         );
@@ -727,8 +808,25 @@ class GameEngine extends ChangeNotifier {
         // Cung thủ tự bắn mũi tên theo nhịp
         if (player.attackCooldown <= 0) {
           player.attackCooldown = 1.0 / totalAttackSpeed;
-          final arrowVx = cos(wAngle) * 380.0;
-          final arrowVy = sin(wAngle) * 380.0;
+          PixelBlock? target;
+          double nearest = double.infinity;
+          for (final block in _blocksNear(center, wRange)) {
+            final distance =
+                (block.transform.position - center).distanceSquared;
+            if (distance < nearest) {
+              nearest = distance;
+              target = block;
+            }
+          }
+          final aim = target == null
+              ? wAngle
+              : atan2(
+                  target.transform.y - center.dy,
+                  target.transform.x - center.dx,
+                );
+          projectileAimAngle = aim;
+          final arrowVx = cos(aim) * 380.0;
+          final arrowVy = sin(aim) * 380.0;
           arrows.add(
             ArrowEntity(
               id: 'arrow_${DateTime.now().millisecondsSinceEpoch}',
@@ -740,7 +838,9 @@ class GameEngine extends ChangeNotifier {
                 width: 14,
                 height: 14,
               ),
-              damage: totalDamage * 0.85,
+              damage: totalDamage,
+              pierceCount: 3 + min(rangeUpgradeLevel, 6) ~/ 2,
+              lifeTime: 1.2 + min(rangeUpgradeLevel, 6) * 0.12,
             ),
           );
         }
@@ -755,7 +855,7 @@ class GameEngine extends ChangeNotifier {
         _checkMeleeLineCollision(
           center,
           rodTip,
-          totalDamage * 1.0,
+          totalDamage * 0.7,
           dt,
           'QUẤT CẦU',
         );
@@ -776,8 +876,9 @@ class GameEngine extends ChangeNotifier {
                 width: 12,
                 height: 12,
               ),
-              damage: totalDamage * 1.25,
+              damage: totalDamage * 0.85,
               origin: center,
+              maxDistance: 140 + min(rangeUpgradeLevel, 6) * 14.0,
             ),
           );
         }
@@ -792,10 +893,16 @@ class GameEngine extends ChangeNotifier {
     double dt,
     String hitLabel,
   ) {
-    for (final block in _blocksInRect(Rect.fromPoints(start, end).inflate(2))) {
+    for (final block in _blocksInRect(
+      Rect.fromPoints(start, end).inflate(role.type == RoleType.farmer ? 6 : 2),
+    )) {
       final rect = block.transform.rect;
-      if (_lineIntersectsRect(start, end, rect)) {
-        _damageBlock(block, dmg * dt * 4.0, hitLabel);
+      if (_lineIntersectsRect(
+        start,
+        end,
+        rect.inflate(role.type == RoleType.farmer ? 4 : 0),
+      )) {
+        _damageBlock(block, dmg * dt * 4.0 * meleeTempo, hitLabel);
       }
     }
   }
@@ -888,6 +995,7 @@ class GameEngine extends ChangeNotifier {
         hooks.removeAt(i);
         continue;
       }
+      if (hook.isReturning && hook.returnHits.length >= 2) continue;
       for (final block in _blocksInRect(
         Rect.fromCircle(center: hook.transform.position, radius: 1),
       )) {
@@ -896,6 +1004,9 @@ class GameEngine extends ChangeNotifier {
               block.id,
             )) {
           _damageBlock(block, hook.damage, 'MÓC GIẬT');
+          if (!hook.isReturning && hook.outboundHits.length >= 2) {
+            hook.isReturning = true;
+          }
           break;
         }
       }
@@ -933,24 +1044,24 @@ class GameEngine extends ChangeNotifier {
       }
 
       // === ÁP DỤNG CÁC NGUYÊN TỐ CƠ BẢN (Đã cân bằng tỉ lệ & Cooldown) ===
-      if (ownedElements.contains(ElementType.fire)) {
-        block.elementAffinity?.applyFire(3.0, totalDamage * 0.25);
+      if (equippedElements.contains(ElementType.fire)) {
+        block.elementAffinity?.applyFire(3.0, elementDamage * 0.25);
         // Hỏa Nổ: 5% tỉ lệ và cooldown 1.6s
         if (_fireBurstCooldown <= 0 && _random.nextDouble() < 0.05) {
           _triggerFireBurst(block);
           _fireBurstCooldown = 1.6;
         }
       }
-      if (ownedElements.contains(ElementType.frost)) {
+      if (equippedElements.contains(ElementType.frost)) {
         block.elementAffinity?.applyFrost(4.0);
       }
-      if (ownedElements.contains(ElementType.poison)) {
-        block.elementAffinity?.applyPoison(4.5, totalDamage * 0.20);
+      if (equippedElements.contains(ElementType.poison)) {
+        block.elementAffinity?.applyPoison(4.5, elementDamage * 0.20);
       }
-      if (ownedElements.contains(ElementType.water)) {
+      if (equippedElements.contains(ElementType.water)) {
         block.elementAffinity?.applyWater(5.0);
       }
-      if (ownedElements.contains(ElementType.lightning)) {
+      if (equippedElements.contains(ElementType.lightning)) {
         block.elementAffinity?.applyShock(1.5);
         // Lôi Điện: Giảm tỉ lệ từ 30% xuống 6% và thêm cooldown 2.0s để không spam
         if (_lightningCooldown <= 0 && _random.nextDouble() < 0.06) {
@@ -959,6 +1070,34 @@ class GameEngine extends ChangeNotifier {
         }
       }
 
+      if (equippedElements.contains(ElementType.voidDark)) {
+        block.elementAffinity?.applyVoid(3.0);
+      }
+      if (_impactCooldown <= 0) {
+        final affinity = block.elementAffinity!;
+        final type = affinity.isFrozen
+            ? ElementType.frost
+            : affinity.burnTimer > 0
+            ? ElementType.fire
+            : affinity.shockTimer > 0
+            ? ElementType.lightning
+            : affinity.poisonTimer > 0
+            ? ElementType.poison
+            : affinity.isSoaked
+            ? ElementType.water
+            : affinity.voidTimer > 0
+            ? ElementType.voidDark
+            : ElementType.none;
+        impacts.add(
+          ElementImpact(
+            center: block.transform.position,
+            element: type,
+            radius: max(10, gridBlockSize * 1.5),
+            angle: player.weaponAngle,
+          ),
+        );
+        _impactCooldown = 0.065;
+      }
       // === CÁC DUNG HỢP NGUYÊN TỐ (FUSIONS) ===
       // 1. Sương Mù (Mist) — Hỏa + Thủy
       if (_fusionCooldown <= 0 &&
@@ -969,7 +1108,7 @@ class GameEngine extends ChangeNotifier {
         mistZones.add(
           MistZone(
             center: block.transform.position,
-            damagePerSec: totalDamage * 0.45,
+            damagePerSec: elementDamage * 0.45,
           ),
         );
         _mistCooldown = 2.5;
@@ -1076,8 +1215,8 @@ class GameEngine extends ChangeNotifier {
     final center = player.transform.position;
     for (final b in _blocksNear(center, 75)) {
       {
-        b.elementAffinity?.applyFire(2.0, totalDamage * 0.3);
-        final killed = b.takeDamage(totalDamage * 0.5 * dt);
+        b.elementAffinity?.applyFire(2.0, elementDamage * 0.3);
+        final killed = b.takeDamage(elementDamage * 0.5 * dt);
         if (killed) _onBlockDestroyed(b);
       }
     }
@@ -1095,8 +1234,8 @@ class GameEngine extends ChangeNotifier {
     for (final b in blocks) {
       if (b == origin || b.health!.isDestroyed) continue;
       if ((b.transform.position - origin.transform.position).distance < 60) {
-        final killed = b.takeDamage(totalDamage * 0.5);
-        b.elementAffinity?.applyFire(2.5, totalDamage * 0.25);
+        final killed = b.takeDamage(elementDamage * 0.5);
+        b.elementAffinity?.applyFire(2.5, elementDamage * 0.25);
         if (killed) {
           _onBlockDestroyed(b);
         }
@@ -1132,7 +1271,7 @@ class GameEngine extends ChangeNotifier {
             Colors.yellowAccent,
           ),
         );
-        final killed = b.takeDamage(totalDamage * 0.7);
+        final killed = b.takeDamage(elementDamage * 0.7);
         b.elementAffinity?.applyShock(1.5);
         if (killed) {
           _onBlockDestroyed(b);
@@ -1177,7 +1316,7 @@ class GameEngine extends ChangeNotifier {
           ),
         );
         block.elementAffinity?.applyShock(1.5);
-        if (block.takeDamage(totalDamage * 0.9)) _onBlockDestroyed(block);
+        if (block.takeDamage(elementDamage * 0.9)) _onBlockDestroyed(block);
       }
     }
   }
@@ -1201,8 +1340,8 @@ class GameEngine extends ChangeNotifier {
     for (final b in blocks) {
       if (b.health!.isDestroyed) continue;
       if ((b.transform.position - center).distance < 90) {
-        b.elementAffinity?.applyFire(3.5, totalDamage * 0.35);
-        final killed = b.takeDamage(totalDamage * 0.4);
+        b.elementAffinity?.applyFire(3.5, elementDamage * 0.35);
+        final killed = b.takeDamage(elementDamage * 0.4);
         if (killed) _onBlockDestroyed(b);
         count++;
         if (count >= 10) break;
@@ -1213,6 +1352,14 @@ class GameEngine extends ChangeNotifier {
 
   // === BĂNG VĨNH CỬU (Permafrost) — Thủy + Băng: Đóng băng tức thì cụm khối ===
   void _triggerPermafrost(PixelBlock origin) {
+    impacts.add(
+      ElementImpact(
+        center: origin.transform.position,
+        element: ElementType.frost,
+        radius: 55,
+        duration: 0.6,
+      ),
+    );
     _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
@@ -1265,7 +1412,7 @@ class GameEngine extends ChangeNotifier {
         );
         b.elementAffinity?.applyFrost(3.0);
         b.elementAffinity?.applyShock(2.0);
-        final killed = b.takeDamage(totalDamage * 1.0);
+        final killed = b.takeDamage(elementDamage * 1.0);
         if (killed) _onBlockDestroyed(b);
         count++;
         if (count >= 6) break;
@@ -1275,6 +1422,14 @@ class GameEngine extends ChangeNotifier {
 
   // === KHÍ NỔ (Explosive Gas) — Độc + Hỏa: Nổ diện rộng khi Độc và Lửa chạm nhau ===
   void _triggerExplosiveGas(PixelBlock origin) {
+    impacts.add(
+      ElementImpact(
+        center: origin.transform.position,
+        element: ElementType.poison,
+        radius: 62,
+        duration: 0.6,
+      ),
+    );
     _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
@@ -1293,8 +1448,8 @@ class GameEngine extends ChangeNotifier {
       final dist = (b.transform.position - origin.transform.position).distance;
       if (dist < 100) {
         final dmgFalloff = 1.0 - (dist / 100.0);
-        final killed = b.takeDamage(totalDamage * 1.3 * dmgFalloff);
-        b.elementAffinity?.applyFire(2.0, totalDamage * 0.25);
+        final killed = b.takeDamage(elementDamage * 1.3 * dmgFalloff);
+        b.elementAffinity?.applyFire(2.0, elementDamage * 0.25);
         if (killed) _onBlockDestroyed(b);
       }
     }
@@ -1302,6 +1457,14 @@ class GameEngine extends ChangeNotifier {
 
   // === AXIT ĂN MÒN (Acid Melt) — Độc + Thủy: Tan chảy thanh HP tối đa của khối ===
   void _triggerAcidMelt(PixelBlock target) {
+    impacts.add(
+      ElementImpact(
+        center: target.transform.position,
+        element: ElementType.poison,
+        radius: 28,
+        duration: 0.6,
+      ),
+    );
     _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
@@ -1315,14 +1478,14 @@ class GameEngine extends ChangeNotifier {
     if (target.health!.currentHp > target.health!.maxHp) {
       target.health!.currentHp = target.health!.maxHp;
     }
-    target.elementAffinity?.applyPoison(5.0, totalDamage * 0.25);
+    target.elementAffinity?.applyPoison(5.0, elementDamage * 0.25);
     int count = 0;
     for (final b in blocks) {
       if (b == target || b.health!.isDestroyed) continue;
       if ((b.transform.position - target.transform.position).distance < 50) {
         b.health!.maxHp *= 0.75;
         b.health!.currentHp = min(b.health!.currentHp, b.health!.maxHp);
-        b.elementAffinity?.applyPoison(3.0, totalDamage * 0.15);
+        b.elementAffinity?.applyPoison(3.0, elementDamage * 0.15);
         count++;
         if (count >= 2) break;
       }
@@ -1331,6 +1494,14 @@ class GameEngine extends ChangeNotifier {
 
   // === LỞ TUYẾT (Avalanche) — Băng + Địa: Sóng tuyết càn quét cả hàng pixel ===
   void _triggerAvalanche(PixelBlock origin) {
+    impacts.add(
+      ElementImpact(
+        center: origin.transform.position,
+        element: ElementType.frost,
+        radius: 70,
+        duration: 0.6,
+      ),
+    );
     _fusionCooldown = 0.6;
     shockwaves.add(
       ShockwaveRing(center: origin.transform.position, color: Colors.white),
@@ -1348,7 +1519,7 @@ class GameEngine extends ChangeNotifier {
       if (b.health!.isDestroyed) continue;
       if (b.row == origin.row) {
         b.elementAffinity?.applyFrost(2.5);
-        final killed = b.takeDamage(totalDamage * 0.85);
+        final killed = b.takeDamage(elementDamage * 0.85);
         if (killed) _onBlockDestroyed(b);
       }
     }
@@ -1385,7 +1556,7 @@ class GameEngine extends ChangeNotifier {
           ),
         );
         b.elementAffinity?.applyShock(2.0);
-        final killed = b.takeDamage(totalDamage * 0.85);
+        final killed = b.takeDamage(elementDamage * 0.85);
         if (killed) _onBlockDestroyed(b);
         count++;
         if (count >= 7) break;
@@ -1395,6 +1566,14 @@ class GameEngine extends ChangeNotifier {
 
   // === DUNG NHAM (Lava Burst) — Hỏa + Địa: Bắn tàn nham nóng chảy ===
   void _triggerLavaBurst(PixelBlock origin) {
+    impacts.add(
+      ElementImpact(
+        center: origin.transform.position,
+        element: ElementType.fire,
+        radius: 52,
+        duration: 0.6,
+      ),
+    );
     _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
@@ -1412,8 +1591,8 @@ class GameEngine extends ChangeNotifier {
       if (b.health!.isDestroyed) continue;
       final dist = (b.transform.position - origin.transform.position).distance;
       if (dist < 80) {
-        b.elementAffinity?.applyFire(4.0, totalDamage * 0.4);
-        final killed = b.takeDamage(totalDamage * 0.55);
+        b.elementAffinity?.applyFire(4.0, elementDamage * 0.4);
+        final killed = b.takeDamage(elementDamage * 0.55);
         if (killed) _onBlockDestroyed(b);
       }
     }
@@ -1595,45 +1774,59 @@ class GameEngine extends ChangeNotifier {
     }
   }
 
-  // Đẩy bóng (Boost / Dash) khi người chơi chạm kéo
-  void boostBall(Offset flingVelocity) {
-    player.transform.vx += flingVelocity.dx * 0.4;
-    player.transform.vy += flingVelocity.dy * 0.4;
-    // Giới hạn vận tốc tối đa
-    final curSpeed = sqrt(
-      player.transform.vx * player.transform.vx +
-          player.transform.vy * player.transform.vy,
-    );
-    final maxSpeed = 480.0;
-    if (curSpeed > maxSpeed) {
-      player.transform.vx = (player.transform.vx / curSpeed) * maxSpeed;
-      player.transform.vy = (player.transform.vy / curSpeed) * maxSpeed;
+  double expDecay(double dt) => pow(0.06, dt).toDouble();
+
+  bool boostBall(Offset flingVelocity) {
+    if (!isGridBuilt ||
+        isLevelCompleted ||
+        dashCooldown > 0 ||
+        flingVelocity.distance < 40) {
+      return false;
     }
+    final direction = flingVelocity / flingVelocity.distance;
+    final speed = min(360.0, normalBallSpeed * 1.55);
+    player.transform.vx = direction.dx * speed;
+    player.transform.vy = direction.dy * speed;
+    dashCooldown = 1.2;
+    impacts.add(
+      ElementImpact(
+        center: player.transform.position,
+        element: ElementType.wind,
+        radius: 28,
+        angle: atan2(direction.dy, direction.dx),
+      ),
+    );
+    hudRevision.value++;
+    return true;
   }
 
   // Thêm nguyên tố mới khi lên cấp
   void addElement(ElementType element) {
+    if (!ElementData.baseElements.any((data) => data.type == element)) return;
     ownedElements.add(element);
+    if (equippedElements.length < maxEquippedElements) {
+      equippedElements.add(element);
+    }
+    hudRevision.value++;
     notifyListeners();
   }
 
-  void upgradeSpinSpeed() {
-    spinUpgradeLevel++;
-    player.spinMultiplier = weaponSpinSpeedMultiplier;
-    floatingTexts.add(
-      FloatingText(
-        text: '🌀 CUỒNG VŨ XOAY!',
-        x: player.transform.x,
-        y: player.transform.y - 15,
-        color: Colors.cyanAccent,
-      ),
-    );
+  bool toggleElement(ElementType element) {
+    if (!ownedElements.contains(element)) return false;
+    if (!equippedElements.remove(element)) {
+      if (equippedElements.length >= maxEquippedElements) return false;
+      equippedElements.add(element);
+    }
+    hudRevision.value++;
     notifyListeners();
+    return true;
   }
+
+  void upgradeSpinSpeed() => grantUpgrade(UpgradeType.spin);
 
   void summonSpirit([ElementType? el]) {
     if (spirits.length >= 4) return;
-    spiritUpgradeLevel++;
+    spiritUpgradeLevel = spirits.length + 1;
     final colors = [
       Colors.cyanAccent,
       Colors.amberAccent,
@@ -1658,7 +1851,7 @@ class GameEngine extends ChangeNotifier {
     }
     floatingTexts.add(
       FloatingText(
-        text: '🔮 THÊM CẦU VỆ TINH!',
+        text: 'TINH LINH HỘ VỆ',
         x: player.transform.x,
         y: player.transform.y - 20,
         color: Colors.cyanAccent,
@@ -1681,93 +1874,107 @@ class GameEngine extends ChangeNotifier {
     return false;
   }
 
-  // Nâng cấp tại Lò rèn
-  int getUpgradeCost(int currentLevel) {
-    int baseCost = 40 + currentLevel * 30;
-    // Giảm giá người lùn (-25%)
-    if (race.type == RaceType.dwarf) {
-      baseCost = (baseCost * 0.75).round();
-    }
-    return baseCost;
+  int upgradeRank(UpgradeType type) => switch (type) {
+    UpgradeType.damage => damageUpgradeLevel,
+    UpgradeType.speed => speedUpgradeLevel,
+    UpgradeType.range => rangeUpgradeLevel,
+    UpgradeType.bounce => bounceUpgradeLevel,
+    UpgradeType.magnet => magnetUpgradeLevel,
+    UpgradeType.spin => spinUpgradeLevel,
+    UpgradeType.spirit => spirits.length,
+    UpgradeType.resonance => resonanceUpgradeLevel,
+  };
+
+  bool canImprove(UpgradeType type) =>
+      upgradeRank(type) < UpgradeSpec.of(type).maxRank;
+
+  int getUpgradeCost(int currentLevel) =>
+      ((50 + currentLevel * 18 + currentLevel * currentLevel * 6) *
+              (1 - race.shopDiscount))
+          .round();
+
+  int upgradeCost(UpgradeType type) {
+    final rank = upgradeRank(type);
+    return ((UpgradeSpec.of(type).baseCost + rank * 18 + rank * rank * 6) *
+            (1 - race.shopDiscount))
+        .round();
   }
 
-  bool upgradeDamage() {
-    final cost = getUpgradeCost(damageUpgradeLevel);
-    if (gold >= cost) {
-      gold -= cost;
-      damageUpgradeLevel++;
-      notifyListeners();
-      return true;
-    }
-    return false;
+  String upgradePreview(UpgradeType type) {
+    final rank = upgradeRank(type);
+    final next = min(rank + 1, UpgradeSpec.of(type).maxRank);
+    return switch (type) {
+      UpgradeType.damage =>
+        '${totalDamage.toStringAsFixed(1)} → ${(totalDamage * (1 + next * 0.12) / (1 + rank * 0.12)).toStringAsFixed(1)} sát thương',
+      UpgradeType.speed =>
+        'x${(1 + rank * 0.12).toStringAsFixed(2)} → x${(1 + next * 0.12).toStringAsFixed(2)} nhịp đánh',
+      UpgradeType.range =>
+        role.type == RoleType.archer
+            ? '${3 + rank ~/ 2} → ${3 + next ~/ 2} khối xuyên · tầm +6'
+            : '${(role.weaponRange + rank * 6).round()} → ${(role.weaponRange + next * 6).round()} tầm quét',
+      UpgradeType.bounce =>
+        '${normalBallSpeed.round()} → ${(160 * (1 + race.bounceBonus + next * 0.08)).round()} tốc độ',
+      UpgradeType.magnet =>
+        '${(80 + rank * 22)} → ${(80 + next * 22)} bán kính hút',
+      UpgradeType.spin =>
+        'x${(1 + rank * 0.18).toStringAsFixed(2)} → x${(1 + next * 0.18).toStringAsFixed(2)} tốc xoay',
+      UpgradeType.spirit => '$rank → $next tinh linh',
+      UpgradeType.resonance =>
+        'x${(1 + rank * 0.1).toStringAsFixed(2)} → x${(1 + next * 0.1).toStringAsFixed(2)} nguyên tố',
+    };
   }
 
-  bool upgradeSpeed() {
-    final cost = getUpgradeCost(speedUpgradeLevel);
-    if (gold >= cost) {
-      gold -= cost;
-      speedUpgradeLevel++;
-      notifyListeners();
-      return true;
+  bool grantUpgrade(UpgradeType type) {
+    if (!canImprove(type)) return false;
+    final oldSpeed = normalBallSpeed;
+    switch (type) {
+      case UpgradeType.damage:
+        damageUpgradeLevel++;
+      case UpgradeType.speed:
+        speedUpgradeLevel++;
+      case UpgradeType.range:
+        rangeUpgradeLevel++;
+      case UpgradeType.bounce:
+        bounceUpgradeLevel++;
+      case UpgradeType.magnet:
+        magnetUpgradeLevel++;
+      case UpgradeType.spin:
+        spinUpgradeLevel++;
+      case UpgradeType.spirit:
+        summonSpirit();
+      case UpgradeType.resonance:
+        resonanceUpgradeLevel++;
     }
-    return false;
+    if (type == UpgradeType.bounce) {
+      player.transform.vx *= normalBallSpeed / oldSpeed;
+      player.transform.vy *= normalBallSpeed / oldSpeed;
+    }
+    player.spinMultiplier = weaponSpinSpeedMultiplier;
+    impacts.add(
+      ElementImpact(
+        center: player.transform.position,
+        element: ElementType.wind,
+        radius: 34,
+      ),
+    );
+    hudRevision.value++;
+    notifyListeners();
+    return true;
   }
 
-  bool upgradeRange() {
-    final cost = getUpgradeCost(rangeUpgradeLevel);
-    if (gold >= cost) {
-      gold -= cost;
-      rangeUpgradeLevel++;
-      notifyListeners();
-      return true;
-    }
-    return false;
+  bool purchaseUpgrade(UpgradeType type) {
+    if (!canImprove(type)) return false;
+    final cost = upgradeCost(type);
+    if (gold < cost) return false;
+    gold -= cost;
+    return grantUpgrade(type);
   }
 
-  bool upgradeBounce() {
-    final cost = getUpgradeCost(bounceUpgradeLevel);
-    if (gold >= cost) {
-      gold -= cost;
-      bounceUpgradeLevel++;
-      final multiplier =
-          (1 + race.bounceBonus + bounceUpgradeLevel * 0.1) /
-          (1 + race.bounceBonus + (bounceUpgradeLevel - 1) * 0.1);
-      player.transform.vx *= multiplier;
-      player.transform.vy *= multiplier;
-      notifyListeners();
-      return true;
-    }
-    return false;
-  }
-
-  bool upgradeMagnet() {
-    final cost = getUpgradeCost(magnetUpgradeLevel);
-    if (gold >= cost) {
-      gold -= cost;
-      magnetUpgradeLevel++;
-      notifyListeners();
-      return true;
-    }
-    return false;
-  }
-
-  bool upgradeSpin() {
-    final cost = getUpgradeCost(spinUpgradeLevel);
-    if (gold >= cost) {
-      gold -= cost;
-      upgradeSpinSpeed();
-      return true;
-    }
-    return false;
-  }
-
-  bool upgradeSpirit() {
-    final cost = getUpgradeCost(spiritUpgradeLevel) + 25;
-    if (gold >= cost && spirits.length < 4) {
-      gold -= cost;
-      summonSpirit();
-      return true;
-    }
-    return false;
-  }
+  bool upgradeDamage() => purchaseUpgrade(UpgradeType.damage);
+  bool upgradeSpeed() => purchaseUpgrade(UpgradeType.speed);
+  bool upgradeRange() => purchaseUpgrade(UpgradeType.range);
+  bool upgradeBounce() => purchaseUpgrade(UpgradeType.bounce);
+  bool upgradeMagnet() => purchaseUpgrade(UpgradeType.magnet);
+  bool upgradeSpin() => purchaseUpgrade(UpgradeType.spin);
+  bool upgradeSpirit() => purchaseUpgrade(UpgradeType.spirit);
 }

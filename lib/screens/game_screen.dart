@@ -4,6 +4,7 @@ import 'package:flutter/scheduler.dart';
 import '../game/game_engine.dart';
 import '../game/game_painter.dart';
 import '../models/character.dart';
+import '../models/element.dart';
 import '../models/pixel_art_data.dart';
 import 'forge_modal.dart';
 import 'fusion_lab_modal.dart';
@@ -38,11 +39,13 @@ class _GameScreenState extends State<GameScreen>
   Duration _lastElapsed = Duration.zero;
   bool _isPaused = false;
   late bool _yetiUnlocked;
+  late int _storyLevelIndex;
 
   @override
   void initState() {
     super.initState();
     _yetiUnlocked = widget.isYetiUnlocked;
+    _storyLevelIndex = widget.levelIndex;
     final levels = MemeLevel.allLevels;
     final currentLevel = levels[widget.levelIndex % levels.length];
 
@@ -105,7 +108,7 @@ class _GameScreenState extends State<GameScreen>
   void _showVictoryDialog() {
     setState(() => _isPaused = true);
 
-    final isFinal = (widget.levelIndex == MemeLevel.allLevels.length - 1);
+    final isFinal = (_storyLevelIndex == MemeLevel.allLevels.length - 1);
     if (isFinal) {
       _yetiUnlocked = true;
     }
@@ -119,17 +122,21 @@ class _GameScreenState extends State<GameScreen>
         isFinalStoryLevel: isFinal,
         onNextLevel: () {
           Navigator.of(context).pop();
-          final nextIdx = (widget.levelIndex + 1) % MemeLevel.allLevels.length;
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => GameScreen(
-                role: widget.role,
-                race: widget.race,
-                levelIndex: nextIdx,
-                isYetiUnlocked: _yetiUnlocked,
+          if (isFinal) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) =>
+                    CharacterSelectScreen(isYetiUnlocked: _yetiUnlocked),
               ),
-            ),
-          );
+            );
+          } else {
+            setState(() {
+              _storyLevelIndex++;
+              _engine.startStoryLevel(MemeLevel.allLevels[_storyLevelIndex]);
+              _isPaused = false;
+              _lastElapsed = Duration.zero;
+            });
+          }
         },
         onReturnMenu: () {
           Navigator.of(context).pop();
@@ -189,10 +196,8 @@ class _GameScreenState extends State<GameScreen>
                   _engine.resize(size, notify: false);
 
                   return GestureDetector(
-                    onPanUpdate: (details) {
-                      // Hích bóng khi người chơi quẹt trên màn hình
-                      _engine.boostBall(details.delta * 2.0);
-                    },
+                    onPanEnd: (details) =>
+                        _engine.boostBall(details.velocity.pixelsPerSecond),
                     child: ClipRect(
                       child: CustomPaint(
                         size: size,
@@ -300,7 +305,9 @@ class _GameScreenState extends State<GameScreen>
                 decoration: BoxDecoration(
                   color: Colors.black45,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.amber.withOpacity(0.5)),
+                  border: Border.all(
+                    color: Colors.amber.withValues(alpha: 0.5),
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -332,7 +339,7 @@ class _GameScreenState extends State<GameScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.purple.withOpacity(0.35),
+                  color: Colors.purple.withValues(alpha: 0.35),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -363,84 +370,152 @@ class _GameScreenState extends State<GameScreen>
               ),
             ],
           ),
+          if (_engine.ownedElements.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  Text(
+                    '${_engine.equippedElements.length}/3  ',
+                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
+                  ...ElementData.baseElements
+                      .where(
+                        (data) => _engine.ownedElements.contains(data.type),
+                      )
+                      .map((data) {
+                        final selected = _engine.equippedElements.contains(
+                          data.type,
+                        );
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 5),
+                          child: Tooltip(
+                            message: data.description,
+                            child: ActionChip(
+                              visualDensity: VisualDensity.compact,
+                              avatar: Icon(
+                                data.icon,
+                                color: selected ? data.color : Colors.white38,
+                                size: 14,
+                              ),
+                              backgroundColor: selected
+                                  ? data.color.withValues(alpha: 0.12)
+                                  : const Color(0xFF172333),
+                              side: BorderSide(
+                                color: selected
+                                    ? data.color.withValues(alpha: 0.5)
+                                    : Colors.white12,
+                              ),
+                              label: Text(
+                                data.name.split(' (').first,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: selected ? data.color : Colors.white38,
+                                ),
+                              ),
+                              onPressed: () {
+                                if (!_engine.toggleElement(data.type)) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Trang bị tối đa 3 nguyên tố. Bỏ chọn một nguyên tố để thay thế.',
+                                      ),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        );
+                      }),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
   Widget _buildBottomControls() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: const Color(0xFF1E293B),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // Nút Lò Rèn
-          ElevatedButton.icon(
-            onPressed: _openForgeModal,
-            icon: const Icon(Icons.hardware, color: Colors.amber, size: 20),
-            label: const Text(
-              'LÒ RÈN',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F172A),
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.amber, width: 1.2),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            ),
+    Widget button(
+      String label,
+      IconData icon,
+      Color color,
+      VoidCallback onTap,
+    ) => Expanded(
+      child: OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: color,
+          side: BorderSide(color: color.withValues(alpha: 0.35)),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
-
-          // Gợi ý điều khiển
-          const Column(
+        ),
+        child: FittedBox(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.touch_app, color: Colors.white38, size: 18),
+              Icon(icon, size: 18),
+              const SizedBox(width: 6),
               Text(
-                'Vuốt để hích bóng',
-                style: TextStyle(color: Colors.white38, fontSize: 10),
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
-
-          // Nút Dung Hợp Nguyên Tố (Lab)
-          ElevatedButton.icon(
-            onPressed: _openFusionLabModal,
-            icon: const Icon(
-              Icons.science,
-              color: Colors.purpleAccent,
-              size: 20,
-            ),
-            label: Row(
-              children: [
-                const Text(
-                  'DUNG HỢP',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                if (_engine.activeFusions.isNotEmpty) ...[
-                  const SizedBox(width: 4),
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: Colors.greenAccent,
-                      shape: BoxShape.circle,
-                    ),
+        ),
+      ),
+    );
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      color: const Color(0xFF172333),
+      child: Row(
+        children: [
+          button(
+            'LÒ RÈN',
+            Icons.hardware_outlined,
+            const Color(0xFFE8C393),
+            _openForgeModal,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: ValueListenableBuilder<int>(
+              valueListenable: _engine.hudRevision,
+              builder: (context, value, child) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.swipe,
+                    size: 18,
+                    color: _engine.dashCooldown > 0
+                        ? Colors.white24
+                        : const Color(0xFF8BCFC6),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _engine.dashCooldown > 0
+                        ? 'Lướt · ${_engine.dashCooldown.toStringAsFixed(1)}s'
+                        : 'Vuốt để lướt',
+                    style: const TextStyle(color: Colors.white54, fontSize: 10),
                   ),
                 ],
-              ],
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F172A),
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.purpleAccent, width: 1.2),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
+          ),
+          const SizedBox(width: 6),
+          button(
+            'DUNG HỢP',
+            Icons.science_outlined,
+            const Color(0xFFC3ABDF),
+            _openFusionLabModal,
           ),
         ],
       ),

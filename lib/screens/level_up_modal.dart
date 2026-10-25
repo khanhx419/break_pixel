@@ -1,13 +1,17 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+
 import '../game/game_engine.dart';
 import '../models/element.dart';
+import '../models/upgrade.dart';
 
-enum ChoiceKind { element, damage, speed, magnet, gold, spin, spirit }
+enum ChoiceKind { element, upgrade, gold }
 
 class LevelUpOption {
   final ChoiceKind kind;
   final ElementData? element;
+  final UpgradeType? upgrade;
   final String title;
   final String description;
   final IconData icon;
@@ -16,6 +20,7 @@ class LevelUpOption {
   LevelUpOption({
     required this.kind,
     this.element,
+    this.upgrade,
     required this.title,
     required this.description,
     required this.icon,
@@ -23,7 +28,7 @@ class LevelUpOption {
   });
 }
 
-class LevelUpModal extends StatelessWidget {
+class LevelUpModal extends StatefulWidget {
   final GameEngine engine;
   final VoidCallback onOptionSelected;
 
@@ -33,119 +38,87 @@ class LevelUpModal extends StatelessWidget {
     required this.onOptionSelected,
   });
 
+  @override
+  State<LevelUpModal> createState() => _LevelUpModalState();
+}
+
+class _LevelUpModalState extends State<LevelUpModal> {
+  GameEngine get engine => widget.engine;
+  late List<LevelUpOption> _options;
+  bool _rerolled = false;
+  bool _selected = false;
+  int get _rerollCost => 25 + engine.characterLevel * 5;
+
+  @override
+  void initState() {
+    super.initState();
+    _options = _getChoices();
+  }
+
   List<LevelUpOption> _getChoices() {
     final rng = Random();
-    final List<LevelUpOption> choices = [];
-
-    // 1. Lọc ra danh sách các nguyên tố CHƯA SỞ HỮU (loại bỏ hoàn toàn các nguyên tố đã có)
-    final unownedElements = ElementData.baseElements
-        .where((e) => !engine.ownedElements.contains(e.type))
-        .toList();
-    unownedElements.shuffle(rng);
-
-    // Lấy tối đa 2 nguyên tố chưa sở hữu
-    for (final el in unownedElements.take(2)) {
-      choices.add(LevelUpOption(
-        kind: ChoiceKind.element,
-        element: el,
-        title: el.name,
-        description: el.description,
-        icon: el.icon,
-        color: el.color,
-      ));
-    }
-
-    // 2. Danh sách các thẻ Cường Hóa Chỉ Số & Kỹ Năng Sáng Tạo Đặc Biệt
-    final List<LevelUpOption> statOptions = [
-      if (engine.spirits.length < 4)
+    final unowned =
+        ElementData.baseElements
+            .where((e) => !engine.ownedElements.contains(e.type))
+            .toList()
+          ..shuffle(rng);
+    final upgrades =
+        UpgradeSpec.all.where((spec) => engine.canImprove(spec.type)).toList()
+          ..shuffle(rng);
+    final options = <LevelUpOption>[
+      if (unowned.isNotEmpty)
         LevelUpOption(
-          kind: ChoiceKind.spirit,
-          title: '🔮 Cầu Vệ Tinh Xoay Quanh (+1 Cầu Hộ Vệ)',
-          description: 'Thêm 1 quả cầu năng lượng bay xoay quanh bóng, tự động va đập và phá nát các khối pixel.',
-          icon: Icons.blur_circular,
-          color: Colors.cyanAccent,
+          kind: ChoiceKind.element,
+          element: unowned.first,
+          title: unowned.first.name,
+          description: unowned.first.description,
+          icon: unowned.first.icon,
+          color: unowned.first.color,
         ),
-      LevelUpOption(
-        kind: ChoiceKind.spin,
-        title: '🌀 Cuồng Vũ Xoay Kiếm (+40% Tốc Độ Xoay)',
-        description: 'Vũ khí xoay tít với tốc độ cuồng phong bão lốc, càn quét toàn bộ khối xung quanh.',
-        icon: Icons.cyclone,
-        color: Colors.cyanAccent,
-      ),
-      LevelUpOption(
-        kind: ChoiceKind.damage,
-        title: 'Cường Hóa Sát Thương (+25%)',
-        description: 'Tăng mạnh uy lực cho đòn đánh, vũ khí xoay và các mũi tên.',
-        icon: Icons.colorize,
-        color: Colors.redAccent,
-      ),
-      LevelUpOption(
-        kind: ChoiceKind.speed,
-        title: 'Tăng Tốc Đánh & Nảy (+20%)',
-        description: 'Quả bóng nảy nhanh hơn và nhịp ra đòn dày đặc hơn đáng kể.',
-        icon: Icons.speed,
-        color: Colors.tealAccent,
-      ),
-      LevelUpOption(
-        kind: ChoiceKind.magnet,
-        title: 'Bão Từ Nam Châm (+40%)',
-        description: 'Tự động hút Vàng và Ngọc EXP từ khoảng cách xa trên toàn sàn.',
-        icon: Icons.all_out,
-        color: Colors.purpleAccent,
-      ),
-      LevelUpOption(
-        kind: ChoiceKind.gold,
-        title: 'Túi Vàng Khổng Lồ (+150 G)',
-        description: 'Nhận ngay 150 Vàng để nâng cấp vũ khí tại Lò Rèn.',
-        icon: Icons.monetization_on,
-        color: Colors.amberAccent,
-      ),
+      ...upgrades
+          .take(unowned.isEmpty ? 3 : 2)
+          .map(
+            (spec) => LevelUpOption(
+              kind: ChoiceKind.upgrade,
+              upgrade: spec.type,
+              title: spec.title,
+              description: engine.upgradePreview(spec.type),
+              icon: spec.icon,
+              color: spec.color,
+            ),
+          ),
     ];
-    statOptions.shuffle(rng);
-
-    // 3. Nếu chưa đủ 3 lựa chọn, bù đắp bằng các thẻ nâng cấp kỹ năng
-    for (final stat in statOptions) {
-      if (choices.length >= 3) break;
-      choices.add(stat);
+    if (options.length < 3) {
+      options.add(
+        LevelUpOption(
+          kind: ChoiceKind.gold,
+          title: 'Dự trữ lò rèn',
+          description: 'Nhận 100 vàng để mua nâng cấp theo ý bạn.',
+          icon: Icons.monetization_on,
+          color: Colors.amberAccent,
+        ),
+      );
     }
-
-    return choices;
+    return options;
   }
 
   void _applyChoice(LevelUpOption choice) {
     switch (choice.kind) {
       case ChoiceKind.element:
-        if (choice.element != null) {
-          engine.addElement(choice.element!.type);
-        }
-        break;
-      case ChoiceKind.spirit:
-        engine.summonSpirit();
-        break;
-      case ChoiceKind.spin:
-        engine.upgradeSpinSpeed();
-        break;
-      case ChoiceKind.damage:
-        engine.damageUpgradeLevel += 2;
-        break;
-      case ChoiceKind.speed:
-        engine.speedUpgradeLevel += 2;
-        break;
-      case ChoiceKind.magnet:
-        engine.magnetUpgradeLevel += 2;
-        break;
+        engine.addElement(choice.element!.type);
+      case ChoiceKind.upgrade:
+        engine.grantUpgrade(choice.upgrade!);
       case ChoiceKind.gold:
-        engine.gold += 150;
-        break;
+        engine.gold += 100;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final options = _getChoices();
+    final options = _options;
 
-    return WillPopScope(
-      onWillPop: () async => false, // Bắt buộc phải chọn 1 thẻ
+    return PopScope(
+      canPop: false, // Choose an upgrade before returning to combat.
       child: Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
@@ -156,126 +129,161 @@ class LevelUpModal extends StatelessWidget {
             border: Border.all(color: Colors.amberAccent, width: 2),
             boxShadow: [
               BoxShadow(
-                color: Colors.amberAccent.withOpacity(0.35),
+                color: Colors.amberAccent.withValues(alpha: 0.35),
                 blurRadius: 25,
                 spreadRadius: 4,
               ),
             ],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header Lên cấp
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.upgrade, color: Colors.amberAccent, size: 28),
-                  SizedBox(width: 8),
-                  Text(
-                    'LÊN CẤP! (LEVEL UP)',
-                    style: TextStyle(
-                      color: Colors.amberAccent,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header Lên cấp
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.upgrade, color: Colors.amberAccent, size: 28),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'CHỌN NÂNG CẤP',
+                        style: TextStyle(
+                          color: Colors.amberAccent,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Nhân vật đạt Cấp ${engine.characterLevel}! Hãy chọn 1 Kỹ Năng mới:',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(height: 20),
+
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: _rerolled || engine.gold < _rerollCost
+                        ? null
+                        : () {
+                            engine.gold -= _rerollCost;
+                            setState(() {
+                              _rerolled = true;
+                              _options = _getChoices();
+                            });
+                          },
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: Text(
+                      _rerolled
+                          ? 'Đã đổi lựa chọn'
+                          : 'Đổi lựa chọn · $_rerollCost G',
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Nhân vật đạt Cấp ${engine.characterLevel}! Hãy chọn 1 Kỹ Năng mới:',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-              const SizedBox(height: 20),
-
-              // 3 Thẻ lựa chọn mới (hoàn toàn không trùng thẻ đã sở hữu)
-              Column(
-                children: options.map((opt) {
-                  return InkWell(
-                    onTap: () {
-                      _applyChoice(opt);
-                      onOptionSelected();
-                      Navigator.of(context).pop();
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: opt.color.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: opt.color, width: 1.5),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: opt.color.withOpacity(0.25),
-                              borderRadius: BorderRadius.circular(10),
+                ),
+                // 3 Thẻ lựa chọn mới (hoàn toàn không trùng thẻ đã sở hữu)
+                Column(
+                  children: options.map((opt) {
+                    return InkWell(
+                      onTap: () {
+                        if (_selected) return;
+                        _selected = true;
+                        _applyChoice(opt);
+                        widget.onOptionSelected();
+                        Navigator.of(context).pop();
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: opt.color.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: opt.color, width: 1.5),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: opt.color.withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(opt.icon, color: opt.color, size: 28),
                             ),
-                            child: Icon(opt.icon, color: opt.color, size: 28),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        opt.title,
-                                        style: TextStyle(
-                                          color: opt.color,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          opt.title,
+                                          style: TextStyle(
+                                            color: opt.color,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: opt.kind == ChoiceKind.element
-                                            ? Colors.purple.withOpacity(0.4)
-                                            : Colors.blue.withOpacity(0.4),
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        opt.kind == ChoiceKind.element
-                                            ? 'NGUYÊN TỐ MỚI'
-                                            : 'CƯỜNG HÓA',
-                                        style: TextStyle(
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
                                           color: opt.kind == ChoiceKind.element
-                                              ? Colors.purpleAccent
-                                              : Colors.lightBlueAccent,
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.bold,
+                                              ? Colors.purple.withValues(
+                                                  alpha: 0.4,
+                                                )
+                                              : Colors.blue.withValues(
+                                                  alpha: 0.4,
+                                                ),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          opt.kind == ChoiceKind.element
+                                              ? 'MỚI'
+                                              : '+1 BẬC',
+                                          style: TextStyle(
+                                            color:
+                                                opt.kind == ChoiceKind.element
+                                                ? Colors.purpleAccent
+                                                : Colors.lightBlueAccent,
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  opt.description,
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
+                                    ],
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    opt.description,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -111,6 +111,11 @@ void main() {
   test('All elements and fusions stay within budgets in sustained combat', () {
     final engine = create();
     engine.ownedElements.addAll(ElementType.values.skip(1).take(8));
+    engine.equippedElements.addAll([
+      ElementType.fire,
+      ElementType.frost,
+      ElementType.lightning,
+    ]);
     engine.activeFusions.addAll(ElementType.values.skip(9));
     for (int i = 0; i < 5; i++) {
       engine.summonSpirit();
@@ -132,6 +137,7 @@ void main() {
         lessThanOrEqualTo(GameEngine.maxFloatingTexts),
       );
       expect(engine.drops.length, lessThanOrEqualTo(GameEngine.maxDrops));
+      expect(engine.impacts.length, lessThanOrEqualTo(GameEngine.maxImpacts));
       expect(engine.mistZones.length, lessThanOrEqualTo(3));
       expect(engine.vortexZones.length, lessThanOrEqualTo(2));
     }
@@ -173,6 +179,20 @@ void main() {
             block.elementAffinity!.applyShock(3);
         }
         block.draw(canvas, Paint(), time: 0.8);
+        ElementImpact(
+            center: block.transform.position,
+            element: [
+              ElementType.none,
+              ElementType.fire,
+              ElementType.frost,
+              ElementType.poison,
+              ElementType.water,
+              ElementType.lightning,
+            ][i],
+            radius: 44,
+          )
+          ..age = 0.12
+          ..draw(canvas, Paint());
       }
       final picture = recorder.endRecording();
       final image = await picture.toImage(656, 132);

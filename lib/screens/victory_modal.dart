@@ -193,7 +193,7 @@ class VictoryModal extends StatelessWidget {
                         ),
                       ),
                       child: Text(
-                        isFinalStoryLevel ? 'CHƠI LẠI VỚI YETI' : 'MÀN TIẾP THEO',
+                        isFinalStoryLevel ? 'CHỌN NHÂN VẬT MỚI' : 'MÀN TIẾP THEO',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 15,

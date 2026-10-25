@@ -1,4 +1,6 @@
+import 'dart:math' as math;
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
 /// Thuộc tính biến đổi không gian (Vị trí, Vận tốc, Kích thước, Góc quay)
@@ -27,11 +29,8 @@ class TransformComponent {
     y = pos.dy;
   }
 
-  Rect get rect => Rect.fromCenter(
-        center: Offset(x, y),
-        width: width,
-        height: height,
-      );
+  Rect get rect =>
+      Rect.fromCenter(center: Offset(x, y), width: width, height: height);
 }
 
 /// Thuộc tính Máu và Độ bền
@@ -63,42 +62,50 @@ class HealthComponent {
 /// Các trạng thái nguyên tố tác động lên thực thể
 enum ElementType {
   none,
-  fire,       // Hỏa
-  water,      // Thủy
-  wind,       // Phong
-  lightning,  // Lôi
-  earth,      // Địa
-  frost,      // Băng
-  poison,     // Độc
-  voidDark,   // Bóng Tối
+  fire, // Hỏa
+  water, // Thủy
+  wind, // Phong
+  lightning, // Lôi
+  earth, // Địa
+  frost, // Băng
+  poison, // Độc
+  voidDark, // Bóng Tối
   // Các hệ Dung Hợp (Fusion)
-  mist,          // Sương Mù (Hỏa + Thủy)
-  chainLightning,// Nhiễm Điện (Thủy + Lôi)
-  firestorm,     // Bão Lửa (Hỏa + Phong)
-  permafrost,    // Băng Vĩnh Cửu (Thủy + Băng)
-  superconductor,// Siêu Dẫn (Băng + Lôi)
-  avalanche,     // Lở Tuyết (Băng + Địa)
-  explosiveGas,  // Khí Nổ (Độc + Hỏa)
-  acidMelt,      // Axit Ăn Mòn (Độc + Thủy)
-  voidVortex,    // Hố Đen Lôi Đình (Bóng Tối + Lôi)
-  lavaBurst,     // Dung Nham (Hỏa + Địa)
+  mist, // Sương Mù (Hỏa + Thủy)
+  chainLightning, // Nhiễm Điện (Thủy + Lôi)
+  firestorm, // Bão Lửa (Hỏa + Phong)
+  permafrost, // Băng Vĩnh Cửu (Thủy + Băng)
+  superconductor, // Siêu Dẫn (Băng + Lôi)
+  avalanche, // Lở Tuyết (Băng + Địa)
+  explosiveGas, // Khí Nổ (Độc + Hỏa)
+  acidMelt, // Axit Ăn Mòn (Độc + Thủy)
+  voidVortex, // Hố Đen Lôi Đình (Bóng Tối + Lôi)
+  lavaBurst, // Dung Nham (Hỏa + Địa)
 }
 
 /// Thuộc tính tương tác nguyên tố
 class ElementAffinityComponent {
-  double burnTimer = 0;      // Thời gian bị cháy
+  double burnTimer = 0; // Thời gian bị cháy
   double burnDps = 0;
-  bool isSoaked = false;     // Đang bị ướt
+  bool isSoaked = false; // Đang bị ướt
   double soakedTimer = 0;
-  bool isFrozen = false;     // Đang bị đóng băng (giòn, x1.5-x2 damage)
+  bool isFrozen = false; // Đang bị đóng băng (giòn, x1.5-x2 damage)
   double frozenTimer = 0;
-  double poisonTimer = 0;    // Bị nhiễm độc
+  double poisonTimer = 0; // Bị nhiễm độc
   double poisonDps = 0;
-  double shockTimer = 0;     // Bị giật điện / nhiễm sét
+  double voidTimer = 0;
+  double get damageMultiplier =>
+      1 + (isFrozen ? 0.5 : 0) + (shockTimer > 0 ? 0.25 : 0);
+
+  void applyVoid(double duration) {
+    voidTimer = math.max(voidTimer, duration);
+  }
+
+  double shockTimer = 0; // Bị giật điện / nhiễm sét
 
   void applyFire(double duration, double dps) {
-    burnTimer = duration;
-    burnDps = dps;
+    burnDps = burnTimer > 0 ? math.max(burnDps, dps) : dps;
+    burnTimer = math.max(burnTimer, duration);
     if (isFrozen) {
       isFrozen = false;
       frozenTimer = 0;
@@ -118,8 +125,8 @@ class ElementAffinityComponent {
   }
 
   void applyPoison(double duration, double dps) {
-    poisonTimer = duration;
-    poisonDps = dps;
+    poisonDps = poisonTimer > 0 ? math.max(poisonDps, dps) : dps;
+    poisonTimer = math.max(poisonTimer, duration);
   }
 
   void applyShock(double duration) {
@@ -127,6 +134,7 @@ class ElementAffinityComponent {
   }
 
   void update(double dt) {
+    if (voidTimer > 0) voidTimer = math.max(0, voidTimer - dt);
     if (burnTimer > 0) burnTimer -= dt;
     if (soakedTimer > 0) {
       soakedTimer -= dt;

@@ -94,6 +94,10 @@ class GamePainter extends CustomPainter {
       arc.draw(canvas, paint);
     }
 
+    for (final impact in engine.impacts) {
+      impact.draw(canvas, paint);
+    }
+
     // 12. Vẽ Hạt nổ tung (Debris)
     for (final p in engine.debris) {
       p.draw(canvas, paint);
@@ -121,7 +125,7 @@ class GamePainter extends CustomPainter {
     paint.shader = null;
 
     // Lưới grid mờ tạo chiều sâu không gian
-    paint.color = Colors.white.withOpacity(0.025);
+    paint.color = Colors.white.withValues(alpha: 0.025);
     paint.strokeWidth = 1.0;
     const step = 32.0;
     for (double x = 0; x < size.width; x += step) {
@@ -171,7 +175,9 @@ class GamePainter extends CustomPainter {
   void _drawWeapon(Canvas canvas, Paint paint) {
     final player = engine.player;
     final center = player.transform.position;
-    final angle = player.weaponAngle;
+    final angle = player.role.type == RoleType.archer
+        ? engine.projectileAimAngle ?? player.weaponAngle
+        : player.weaponAngle;
     final range = engine.totalWeaponRange;
 
     // Vệt chém hình vòng cung phát sáng rực rỡ (Slash Arc Trail)
@@ -193,7 +199,7 @@ class GamePainter extends CustomPainter {
             player.role.themeColor,
             Colors.white,
             t * 0.7,
-          )!.withOpacity(t * 0.6);
+          )!.withValues(alpha: t * 0.6);
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: range * 0.88),
           segStart,
@@ -273,7 +279,7 @@ class GamePainter extends CustomPainter {
     canvas.drawArc(bowRect, -pi / 2, pi, false, paint);
 
     // Dây cung
-    paint.color = Colors.white.withOpacity(0.6);
+    paint.color = Colors.white.withValues(alpha: 0.6);
     paint.strokeWidth = 1.0;
     canvas.drawLine(const Offset(18, -18), const Offset(18, 18), paint);
   }
@@ -340,12 +346,12 @@ class GamePainter extends CustomPainter {
         text: TextSpan(
           text: textItem.text,
           style: TextStyle(
-            color: textItem.color.withOpacity(textItem.alpha),
+            color: textItem.color.withValues(alpha: textItem.alpha),
             fontSize: 13,
             fontWeight: FontWeight.bold,
             shadows: [
               Shadow(
-                color: Colors.black.withOpacity(0.8),
+                color: Colors.black.withValues(alpha: 0.8),
                 offset: const Offset(1, 1),
                 blurRadius: 2,
               ),

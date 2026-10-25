@@ -27,8 +27,10 @@ class PixelBlock extends GameEntity {
   });
 
   bool takeDamage(double damage) {
-    if (elementAffinity?.isFrozen ?? false) damage *= 1.5;
-    if ((elementAffinity?.shockTimer ?? 0) > 0) damage *= 1.25;
+    damage *= elementAffinity?.damageMultiplier ?? 1;
+    if ((elementAffinity?.voidTimer ?? 0) > 0 && health!.hpPercent < 0.35) {
+      damage *= 1.12;
+    }
     return health!.takeDamage(damage);
   }
 
@@ -74,12 +76,13 @@ class PixelBlock extends GameEntity {
     if (burning) face = Color.lerp(face, const Color(0xFF9B432B), 0.48)!;
     if (frozen) face = Color.lerp(face, const Color(0xFF8BC7DC), 0.55)!;
     if (shocked) face = Color.lerp(face, const Color(0xFFBDA669), 0.24)!;
-    if (hitFlashTimer > 0)
+    if (hitFlashTimer > 0) {
       face = Color.lerp(
         face,
         Colors.white,
         (hitFlashTimer / 0.1).clamp(0, 1) * 0.45,
       )!;
+    }
 
     paint
       ..shader = null
@@ -148,20 +151,38 @@ class PixelBlock extends GameEntity {
       for (int i = 0; i < 2; i++) {
         final x = rect.left + unit * (0.32 + i * 0.34);
         final lift = unit * (0.12 + (sin(phase * 1.8 + i * 2) + 1) * 0.07);
+        final base = Offset(x, rect.top + unit * 0.26);
+        final flame = Path()
+          ..moveTo(base.dx - unit * 0.08, base.dy)
+          ..quadraticBezierTo(
+            base.dx - unit * 0.13,
+            base.dy - lift * 0.5,
+            base.dx + unit * 0.07,
+            base.dy - lift * 1.3,
+          )
+          ..quadraticBezierTo(
+            base.dx + unit * 0.02,
+            base.dy - lift * 0.55,
+            base.dx + unit * 0.08,
+            base.dy - lift * 0.35,
+          )
+          ..quadraticBezierTo(
+            base.dx + unit * 0.14,
+            base.dy,
+            base.dx - unit * 0.08,
+            base.dy,
+          );
         paint
-          ..strokeWidth = unit * 0.13
-          ..color = const Color(0xDDF08D49);
-        canvas.drawLine(
-          Offset(x, rect.top + unit * 0.24),
-          Offset(x + unit * 0.04, rect.top + unit * 0.24 - lift),
-          paint,
-        );
-        paint
-          ..strokeWidth = unit * 0.055
-          ..color = const Color(0xFFF9D38B);
-        canvas.drawLine(
-          Offset(x, rect.top + unit * 0.24),
-          Offset(x, rect.top + unit * 0.13),
+          ..style = PaintingStyle.fill
+          ..color = const Color(0xEFFF9C56);
+        canvas.drawPath(flame, paint);
+        paint.color = const Color(0xFFFFE1A0);
+        canvas.drawOval(
+          Rect.fromCenter(
+            center: base - Offset(0, lift * 0.2),
+            width: unit * 0.07,
+            height: lift * 0.5,
+          ),
           paint,
         );
       }
@@ -211,6 +232,19 @@ class PixelBlock extends GameEntity {
       canvas.drawLine(
         center + Offset(-unit * 0.08, unit * 0.04),
         center + Offset(unit * 0.18, unit * 0.27),
+        paint,
+      );
+    }
+    if ((affinity?.voidTimer ?? 0) > 0) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.6, unit * 0.055)
+        ..color = const Color(0xCCB599DC);
+      canvas.drawArc(
+        Rect.fromCircle(center: rect.center, radius: unit * 0.26),
+        phase * 0.4,
+        pi * 1.5,
+        false,
         paint,
       );
     }
@@ -287,14 +321,15 @@ class PlayerBall extends GameEntity {
       final tProgress = 1.0 - (i / trail.length);
       final tAlpha = tProgress * 0.35;
       final tRadius = radius * (0.4 + 0.6 * tProgress);
-      final trailPaint = Paint()..color = role.themeColor.withOpacity(tAlpha);
+      final trailPaint = Paint()
+        ..color = role.themeColor.withValues(alpha: tAlpha);
       canvas.drawCircle(tPos, tRadius, trailPaint);
     }
 
     // 1. Nếu là Tộc Yeti: Vẽ hào quang băng giá (Frost Aura)
     if (race.type == RaceType.yeti) {
       final auraPaint = Paint()
-        ..color = Colors.cyanAccent.withOpacity(0.25)
+        ..color = Colors.cyanAccent.withValues(alpha: 0.25)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
       canvas.drawCircle(center, radius + 12, auraPaint);
     }
@@ -318,7 +353,7 @@ class PlayerBall extends GameEntity {
     paint.shader = null;
 
     // 3. Viền ánh sáng mượt mà
-    paint.color = Colors.white.withOpacity(0.6);
+    paint.color = Colors.white.withValues(alpha: 0.6);
     paint.style = PaintingStyle.stroke;
     paint.strokeWidth = 1.5;
     canvas.drawCircle(center, radius, paint);
@@ -328,6 +363,7 @@ class PlayerBall extends GameEntity {
 /// Mũi tên của Cung thủ
 class ArrowEntity extends GameEntity {
   final double damage;
+  final List<Offset> trail = [];
   final Set<String> hitBlocks = {};
   int pierceCount;
   double lifeTime;
@@ -342,6 +378,8 @@ class ArrowEntity extends GameEntity {
 
   @override
   void update(double dt) {
+    trail.insert(0, transform.position);
+    if (trail.length > 4) trail.removeLast();
     transform.x += transform.vx * dt;
     transform.y += transform.vy * dt;
     lifeTime -= dt;
@@ -349,6 +387,14 @@ class ArrowEntity extends GameEntity {
 
   @override
   void draw(Canvas canvas, Paint paint) {
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    for (int i = 0; i < trail.length - 1; i++) {
+      paint.color = const Color(0xFFAADDB7)
+          .withValues(alpha: 0.32 * (1 - i / trail.length));
+      canvas.drawLine(trail[i], trail[i + 1], paint);
+    }
     final center = transform.position;
     final angle = atan2(transform.vy, transform.vx);
 
@@ -373,6 +419,7 @@ class ArrowEntity extends GameEntity {
 /// Móc câu của Người đánh cá
 class HookEntity extends GameEntity {
   final double damage;
+  final double maxDistance;
   double distanceTravelled = 0.0;
   bool isReturning = false;
   Offset origin;
@@ -384,6 +431,7 @@ class HookEntity extends GameEntity {
     required super.transform,
     required this.damage,
     required this.origin,
+    this.maxDistance = 140,
   });
 
   @override
@@ -392,7 +440,7 @@ class HookEntity extends GameEntity {
       transform.x += transform.vx * dt;
       transform.y += transform.vy * dt;
       distanceTravelled += 300 * dt;
-      if (distanceTravelled > 140) isReturning = true;
+      if (distanceTravelled > maxDistance) isReturning = true;
     } else {
       final dx = origin.dx - transform.x;
       final dy = origin.dy - transform.y;
@@ -406,16 +454,36 @@ class HookEntity extends GameEntity {
 
   @override
   void draw(Canvas canvas, Paint paint) {
-    // Dây câu nối từ origin đến đầu móc
-    paint.color = Colors.cyanAccent.withOpacity(0.5);
-    paint.strokeWidth = 1.0;
-    paint.style = PaintingStyle.stroke;
-    canvas.drawLine(origin, transform.position, paint);
-
-    // Đầu móc câu
-    paint.color = Colors.cyanAccent;
-    paint.strokeWidth = 2.5;
-    canvas.drawCircle(transform.position, 4, paint);
+    final pos = transform.position;
+    final middle =
+        (origin + pos) / 2 + Offset(0, min(14, (pos - origin).distance * 0.12));
+    final line = Path()
+      ..moveTo(origin.dx, origin.dy)
+      ..quadraticBezierTo(middle.dx, middle.dy, pos.dx, pos.dy);
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = const Color(0x7793BFC9);
+    canvas.drawPath(line, paint);
+    canvas.save();
+    canvas.translate(pos.dx, pos.dy);
+    canvas.rotate(
+      isReturning
+          ? atan2(origin.dy - pos.dy, origin.dx - pos.dx)
+          : atan2(transform.vy, transform.vx),
+    );
+    paint
+      ..strokeWidth = 1.6
+      ..color = const Color(0xFFD1E5EA);
+    final hook = Path()
+      ..moveTo(-5, 0)
+      ..lineTo(3, 0)
+      ..quadraticBezierTo(8, 0, 7, 5)
+      ..quadraticBezierTo(5, 8, 3, 4)
+      ..lineTo(2, 6);
+    canvas.drawPath(hook, paint);
+    canvas.restore();
+    paint.style = PaintingStyle.fill;
   }
 }
 
@@ -491,7 +559,7 @@ class ShockwaveRing {
 
   void draw(Canvas canvas, Paint paint) {
     final alpha = (currentLife / lifeTime).clamp(0.0, 1.0);
-    paint.color = color.withOpacity(alpha * 0.8);
+    paint.color = color.withValues(alpha: alpha * 0.8);
     paint.style = PaintingStyle.stroke;
     paint.strokeWidth = 3.0 * alpha;
     canvas.drawCircle(center, radius, paint);
@@ -535,7 +603,7 @@ class PixelDebris {
   }
 
   void draw(Canvas canvas, Paint paint) {
-    paint.color = color.withOpacity(alpha);
+    paint.color = color.withValues(alpha: alpha);
     paint.style = PaintingStyle.fill;
     canvas.save();
     canvas.translate(x, y);
@@ -672,12 +740,12 @@ class OrbitingSpirit {
     for (int i = trail.length - 1; i >= 0; i--) {
       final tPos = trail[i];
       final prog = 1.0 - (i / trail.length);
-      final trailPaint = Paint()..color = color.withOpacity(prog * 0.35);
+      final trailPaint = Paint()..color = color.withValues(alpha: prog * 0.35);
       canvas.drawCircle(tPos, size * (0.4 + prog * 0.5), trailPaint);
     }
 
     // Hào quang tinh linh
-    final glowPaint = Paint()..color = color.withOpacity(0.55);
+    final glowPaint = Paint()..color = color.withValues(alpha: 0.55);
     canvas.drawCircle(pos, size * 1.6, glowPaint);
 
     // Lõi tinh linh phát sáng
@@ -759,7 +827,7 @@ class LightningArc {
 
 /// A persistent lightning field; tiles stay aligned with their hidden artwork.
 class VoidVortexZone {
-  final Offset center;
+  Offset center;
   double life = 2.5;
   double pulse = 0.5;
 
@@ -781,5 +849,119 @@ class VoidVortexZone {
         paint,
       );
     }
+  }
+}
+
+/// A handful of parametric strokes, with no particles or blur per elemental hit.
+class ElementImpact {
+  final Offset center;
+  final ElementType element;
+  final double radius;
+  final double angle;
+  final double duration;
+  double age = 0;
+  ElementImpact({
+    required this.center,
+    required this.element,
+    this.radius = 22,
+    this.angle = 0,
+    this.duration = 0.38,
+  });
+
+  bool update(double dt) {
+    age += dt;
+    return age >= duration;
+  }
+
+  Color get color => switch (element) {
+    ElementType.fire => const Color(0xFFF0A064),
+    ElementType.frost => const Color(0xFFAAE2F4),
+    ElementType.poison => const Color(0xFFB3D48A),
+    ElementType.water => const Color(0xFF7BCDE7),
+    ElementType.lightning => const Color(0xFFFFD987),
+    ElementType.voidDark => const Color(0xFFC7A5F2),
+    ElementType.wind => const Color(0xFF9CDDD5),
+    _ => const Color(0xFFE8D8B9),
+  };
+
+  void draw(Canvas canvas, Paint paint) {
+    final t = (age / duration).clamp(0.0, 1.0);
+    final ease = 1 - pow(1 - t, 3).toDouble();
+    final reach = radius * (0.18 + ease * 0.82);
+    paint
+      ..shader = null
+      ..maskFilter = null
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 1.5 * (1 - t) + 0.3
+      ..color = color.withValues(alpha: (1 - t) * 0.8);
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(angle);
+    if (element == ElementType.water || element == ElementType.wind) {
+      for (int i = 0; i < 2; i++) {
+        canvas.drawArc(
+          Rect.fromCircle(center: Offset.zero, radius: reach * (1 - i * 0.3)),
+          i * pi + t,
+          pi * 0.8,
+          false,
+          paint,
+        );
+      }
+    } else if (element == ElementType.fire || element == ElementType.voidDark) {
+      for (int i = 0; i < 3; i++) {
+        canvas.drawArc(
+          Rect.fromCircle(center: Offset.zero, radius: reach),
+          i * pi * 2 / 3 + t * 1.5,
+          0.8,
+          false,
+          paint,
+        );
+      }
+    } else if (element == ElementType.poison) {
+      paint.style = PaintingStyle.fill;
+      for (int i = 0; i < 5; i++) {
+        final a = i * pi * 2 / 5;
+        canvas.drawCircle(
+          Offset(cos(a), sin(a)) * reach,
+          (1 - t) * 2.2 + 0.3,
+          paint,
+        );
+      }
+    } else if (element == ElementType.none) {
+      canvas.drawArc(
+        Rect.fromCircle(center: Offset.zero, radius: reach),
+        -0.65,
+        1.3,
+        false,
+        paint,
+      );
+      canvas.drawLine(Offset(-reach * 0.3, 0), Offset(reach * 0.5, 0), paint);
+    } else {
+      for (int i = 0; i < 5; i++) {
+        final a = i * pi * 2 / 5;
+        final start = Offset(cos(a), sin(a)) * reach * 0.5;
+        final end = Offset(cos(a + 0.12), sin(a + 0.12)) * reach;
+        canvas.drawLine(start, end, paint);
+        if (element == ElementType.frost) {
+          canvas.drawLine(
+            end,
+            end + Offset(cos(a + 2.5), sin(a + 2.5)) * radius * 0.15,
+            paint,
+          );
+        }
+      }
+    }
+    if (t < 0.35) {
+      paint
+        ..style = PaintingStyle.fill
+        ..color = const Color(0xFFFFF3D8)
+            .withValues(alpha: (1 - t / 0.35) * 0.6);
+      canvas.drawCircle(Offset.zero, radius * 0.1, paint);
+    }
+    canvas.restore();
+    paint
+      ..style = PaintingStyle.fill
+      ..strokeCap = StrokeCap.butt;
   }
 }

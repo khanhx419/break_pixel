@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'ecs.dart';
 
 class ElementData {
@@ -24,7 +25,8 @@ class ElementData {
     ElementData(
       type: ElementType.fire,
       name: 'Hỏa (Fire)',
-      description: 'Thiêu đốt pixel, gây sát thương liên tục và nổ lan tàn lửa.',
+      description:
+          'Thiêu đốt pixel, gây sát thương liên tục và nổ lan tàn lửa.',
       icon: Icons.local_fire_department,
       color: Colors.deepOrangeAccent,
     ),
@@ -38,21 +40,23 @@ class ElementData {
     ElementData(
       type: ElementType.wind,
       name: 'Phong (Wind)',
-      description: 'Tăng tốc độ xoay vũ khí, phóng lưỡi đao gió chém xuyên khối.',
+      description: 'Tăng 25% tốc xoay vũ khí; Tộc Elf nhận 35%.',
       icon: Icons.air,
       color: Colors.tealAccent,
     ),
     ElementData(
       type: ElementType.lightning,
       name: 'Lôi (Lightning)',
-      description: 'Phóng tia sét giật cực nhanh, gây sát thương tức thời.',
+      description:
+          'Khối nhiễm điện nhận thêm 25% sát thương; sét lan 6%, hồi 2 giây.',
       icon: Icons.bolt,
       color: Colors.amberAccent,
     ),
     ElementData(
       type: ElementType.earth,
       name: 'Địa (Earth)',
-      description: 'Gia tăng trọng lực cú nảy, gây chấn động nứt vỡ khối xung quanh.',
+      description:
+          'Tăng 20% sát thương va chạm của bóng; kết hợp với Băng hoặc Hỏa.',
       icon: Icons.landscape,
       color: Colors.brown,
     ),
@@ -66,14 +70,15 @@ class ElementData {
     ElementData(
       type: ElementType.poison,
       name: 'Độc (Poison)',
-      description: 'Tiết dịch độc ăn mòn HP theo thời gian và lây lan sang các khối tiếp giáp.',
+      description:
+          'Ăn mòn HP liên tục trong 4,5 giây; tái áp dụng không cộng dồn DPS.',
       icon: Icons.coronavirus,
       color: Colors.lightGreenAccent,
     ),
     ElementData(
       type: ElementType.voidDark,
       name: 'Bóng Tối (Void)',
-      description: 'Tạo lực hút vi mô kéo dồn các khối pixel về tâm quỹ đạo.',
+      description: 'Hắc ấn tăng 12% sát thương khi khối còn dưới 35% HP; kết hợp với Lôi.',
       icon: Icons.brightness_3,
       color: Colors.purpleAccent,
     ),
@@ -92,7 +97,7 @@ class ElementData {
     ElementData(
       type: ElementType.chainLightning,
       name: 'Nhiễm Điện (Chain Lightning)',
-      description: 'Thủy + Lôi: Phóng tia sét lan truyền qua 6-10 khối pixel lân cận trong chớp mắt.',
+      description: 'Thủy + Lôi: Phóng tia sét lan truyền qua tối đa 24 khối ướt tiếp giáp trong chớp mắt.',
       icon: Icons.electric_bolt,
       color: Colors.yellowAccent,
       isFusion: true,
@@ -110,7 +115,7 @@ class ElementData {
     ElementData(
       type: ElementType.permafrost,
       name: 'Băng Vĩnh Cửu (Permafrost)',
-      description: 'Thủy + Băng: Đóng băng tức thì cụm pixel, đòn đánh kế tiếp vỡ vụn x2 sát thương.',
+      description: 'Thủy + Băng: Đóng băng tức thì cụm pixel, khối đông cứng nhận thêm 50% sát thương trong 6 giây.',
       icon: Icons.severe_cold,
       color: Colors.cyan,
       isFusion: true,
