@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../game/game_engine.dart';
+import '../core/progress_store.dart';
 import '../game/game_painter.dart';
 import '../models/character.dart';
 import '../models/element.dart';
@@ -15,6 +18,7 @@ import 'character_select_screen.dart';
 class GameScreen extends StatefulWidget {
   final RoleInfo role;
   final RaceInfo race;
+  final Map<String, dynamic>? resumeSnapshot;
   final int levelIndex;
   final bool isEndless;
   final bool isYetiUnlocked;
@@ -24,17 +28,41 @@ class GameScreen extends StatefulWidget {
     required this.role,
     required this.race,
     this.levelIndex = 0,
+    this.resumeSnapshot,
     this.isEndless = false,
     this.isYetiUnlocked = false,
   });
+
+  factory GameScreen.resume(Map<String, dynamic> snapshot) => GameScreen(
+    role:
+        RoleInfo.allRoles
+            .where((r) => r.type.name == snapshot['role'])
+            .firstOrNull ??
+        RoleInfo.allRoles.first,
+    race:
+        RaceInfo.allRaces
+            .where((r) => r.type.name == snapshot['race'])
+            .firstOrNull ??
+        RaceInfo.allRaces.first,
+    levelIndex: ((snapshot['levelId'] as int? ?? 1) - 1).clamp(
+      0,
+      MemeLevel.allLevels.length - 1,
+    ),
+    isEndless: snapshot['endless'] == true,
+    resumeSnapshot: snapshot,
+  );
 
   @override
   State<GameScreen> createState() => _GameScreenState();
 }
 
 class _GameScreenState extends State<GameScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late GameEngine _engine;
+  Timer? _saveTimer;
+  bool _lifecyclePaused = false;
+  bool _levelChoicePending = false;
+  ProgressStore get _progress => ProgressStore.instance;
   late Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
   bool _isPaused = false;
@@ -44,7 +72,8 @@ class _GameScreenState extends State<GameScreen>
   @override
   void initState() {
     super.initState();
-    _yetiUnlocked = widget.isYetiUnlocked;
+    _yetiUnlocked = widget.isYetiUnlocked || _progress.yetiUnlocked;
+    WidgetsBinding.instance.addObserver(this);
     _storyLevelIndex = widget.levelIndex;
     final levels = MemeLevel.allLevels;
     final currentLevel = levels[widget.levelIndex % levels.length];
@@ -56,13 +85,59 @@ class _GameScreenState extends State<GameScreen>
       isEndless: widget.isEndless,
     );
 
+    if (widget.resumeSnapshot != null) {
+      try {
+        _engine.restoreSnapshot(widget.resumeSnapshot!);
+        _levelChoicePending =
+            widget.resumeSnapshot!['levelChoicePending'] == true;
+      } catch (_) {
+        _progress.storageError = 'Không khôi phục được màn đang dở. Màn và nguyên tố đã mở vẫn được giữ.';
+        _engine.dispose();
+        _engine = GameEngine(
+          role: widget.role,
+          race: widget.race,
+          level: currentLevel,
+          isEndless: widget.isEndless,
+        );
+      }
+    } else if (!widget.isEndless && _progress.storyBuild != null) {
+      try {
+        _engine.restoreBuild(_progress.storyBuild!);
+        _levelChoicePending =
+            _progress.storyBuild!['levelChoicePending'] == true;
+      } catch (_) {
+        _progress.storageError = 'Không khôi phục được nâng cấp. Màn và nguyên tố đã mở vẫn được giữ.';
+        _engine.dispose();
+        _engine = GameEngine(
+          role: widget.role,
+          race: widget.race,
+          level: currentLevel,
+        );
+      }
+    }
+    for (final element in _progress.unlockedElements) {
+      if (!_engine.ownedElements.contains(element)) _engine.addElement(element);
+    }
+    _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!_isPaused) _saveRun();
+    });
+    if (_levelChoicePending) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showLevelUpDialog();
+      });
+    } else if (_engine.isLevelCompleted && !widget.isEndless) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showVictoryDialog();
+      });
+    }
+
     // Đăng ký callbacks
     _engine.onLevelUp = _showLevelUpDialog;
     _engine.onVictory = _showVictoryDialog;
 
     // Khởi tạo Game Loop Ticker
     _ticker = createTicker((elapsed) {
-      if (_isPaused) {
+      if (_isPaused || _lifecyclePaused) {
         _lastElapsed = elapsed;
         return;
       }
@@ -83,12 +158,43 @@ class _GameScreenState extends State<GameScreen>
 
   @override
   void dispose() {
+    _saveTimer?.cancel();
+    _saveRun();
+    WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
     _engine.dispose();
     super.dispose();
   }
 
+  void _saveRun() {
+    if (!_engine.isGridBuilt) return;
+    if (widget.isEndless) {
+      _progress.endlessRun = _engine.exportSnapshot()
+        ..['levelChoicePending'] = _levelChoicePending;
+    } else {
+      _progress.storyBuild = _engine.exportBuild()
+        ..['levelChoicePending'] = _levelChoicePending;
+      _progress.storyRun = _engine.isLevelCompleted
+          ? null
+          : (_engine.exportSnapshot()
+              ..['levelChoicePending'] = _levelChoicePending);
+    }
+    unawaited(_progress.save());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecyclePaused = state != AppLifecycleState.resumed;
+    if (_lifecyclePaused) {
+      _saveRun();
+    } else {
+      _lastElapsed = Duration.zero;
+    }
+  }
+
   void _showLevelUpDialog() {
+    _levelChoicePending = true;
+    _saveRun();
     setState(() => _isPaused = true);
 
     showDialog(
@@ -97,17 +203,24 @@ class _GameScreenState extends State<GameScreen>
       builder: (context) => LevelUpModal(
         engine: _engine,
         onOptionSelected: () {
+          _levelChoicePending = false;
           setState(() => _isPaused = false);
         },
       ),
     ).then((_) {
-      if (mounted) setState(() => _isPaused = false);
+      if (mounted) {
+        setState(() => _isPaused = false);
+        _saveRun();
+      }
     });
   }
 
   void _showVictoryDialog() {
     setState(() => _isPaused = true);
 
+    final reward = _progress.completeLevel(_engine.level.id);
+    if (reward != null) _engine.addElement(reward);
+    _saveRun();
     final isFinal = (_storyLevelIndex == MemeLevel.allLevels.length - 1);
     if (isFinal) {
       _yetiUnlocked = true;
@@ -119,6 +232,9 @@ class _GameScreenState extends State<GameScreen>
       builder: (context) => VictoryModal(
         level: _engine.level,
         earnedGold: _engine.gold,
+        rewardElement: reward == null
+            ? null
+            : ElementData.baseElements.firstWhere((e) => e.type == reward).name,
         isFinalStoryLevel: isFinal,
         onNextLevel: () {
           Navigator.of(context).pop();
@@ -135,6 +251,7 @@ class _GameScreenState extends State<GameScreen>
               _engine.startStoryLevel(MemeLevel.allLevels[_storyLevelIndex]);
               _isPaused = false;
               _lastElapsed = Duration.zero;
+              _saveRun();
             });
           }
         },
@@ -159,7 +276,10 @@ class _GameScreenState extends State<GameScreen>
       isScrollControlled: true,
       builder: (context) => ForgeModal(engine: _engine),
     ).then((_) {
-      if (mounted) setState(() => _isPaused = false);
+      if (mounted) {
+        setState(() => _isPaused = false);
+        _saveRun();
+      }
     });
   }
 
@@ -171,14 +291,17 @@ class _GameScreenState extends State<GameScreen>
       isScrollControlled: true,
       builder: (context) => FusionLabModal(engine: _engine),
     ).then((_) {
-      if (mounted) setState(() => _isPaused = false);
+      if (mounted) {
+        setState(() => _isPaused = false);
+        _saveRun();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: _engine.level.theme.sky,
       body: SafeArea(
         child: Column(
           children: [
@@ -196,6 +319,19 @@ class _GameScreenState extends State<GameScreen>
                   _engine.resize(size, notify: false);
 
                   return GestureDetector(
+                    onTapUp: (details) {
+                      if (_engine.canCastFusion &&
+                          !_engine.castFusion(details.localPosition)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Chọn khối đúng trạng thái trong tầm 180.',
+                            ),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
                     onPanEnd: (details) =>
                         _engine.boostBall(details.velocity.pixelsPerSecond),
                     child: ClipRect(
@@ -210,6 +346,77 @@ class _GameScreenState extends State<GameScreen>
             ),
 
             // Bottom Bar: Hướng dẫn vuốt và các nút Lò Rèn / Dung Hợp
+            ValueListenableBuilder<int>(
+              valueListenable: _engine.hudRevision,
+              builder: (context, value, child) {
+                final data = _engine.fusionData;
+                if (data == null) return const SizedBox.shrink();
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  color: const Color(0xFF15212F),
+                  child: Row(
+                    children: [
+                      Icon(data.icon, color: data.color, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              data.name.split(' (').first,
+                              style: TextStyle(
+                                color: data.color,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            LinearProgressIndicator(
+                              value: _engine.fusionMeterProgress,
+                              minHeight: 3,
+                              color: data.color,
+                              backgroundColor: Colors.white10,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _engine.fusionStatus,
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: !_engine.canCastFusion
+                            ? null
+                            : () {
+                                if (!_engine.castFusion()) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Chưa có mục tiêu đúng trạng thái trong tầm.',
+                                      ),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              },
+                        child: const Text(
+                          'GIẢI PHÓNG',
+                          style: TextStyle(fontSize: 10),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
             _buildBottomControls(),
           ],
         ),
@@ -225,13 +432,14 @@ class _GameScreenState extends State<GameScreen>
   Widget _buildTopHUDContent() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      color: const Color(0xFF1E293B),
+      color: Color.lerp(_engine.level.theme.sky, const Color(0xFF172333), 0.65),
       child: Column(
         children: [
           Row(
             children: [
               // Nút thoát về menu
               IconButton(
+                tooltip: 'Về chọn màn · Tự lưu tiến trình',
                 icon: const Icon(
                   Icons.arrow_back_ios,
                   color: Colors.white70,
@@ -260,6 +468,15 @@ class _GameScreenState extends State<GameScreen>
                         color: Colors.white,
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      _engine.level.theme.name,
+                      style: TextStyle(
+                        color: _engine.level.theme.accent.withValues(
+                          alpha: 0.7,
+                        ),
+                        fontSize: 10,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -434,6 +651,26 @@ class _GameScreenState extends State<GameScreen>
               ),
             ),
           ],
+          const SizedBox(height: 4),
+          AnimatedBuilder(
+            animation: _progress,
+            builder: (context, child) => Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                _progress.storageError ??
+                    (_progress.savedAt == null
+                        ? 'Tự lưu mỗi 5 giây'
+                        : 'Đã tự lưu trên thiết bị'),
+                maxLines: 2,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: _progress.storageError == null
+                      ? Colors.white38
+                      : Colors.orangeAccent,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

@@ -44,7 +44,12 @@ class GamePainter extends CustomPainter {
 
     // 4. Vẽ các Khối Pixel còn nguyên hoặc đang bị nứt
     for (final block in engine.blocks) {
-      block.draw(canvas, paint, time: engine.elapsedTime);
+      block.draw(
+        canvas,
+        paint,
+        time: engine.elapsedTime,
+        theme: engine.level.theme,
+      );
     }
 
     for (final mist in engine.mistZones) {
@@ -98,6 +103,36 @@ class GamePainter extends CustomPainter {
       impact.draw(canvas, paint);
     }
 
+    for (final cast in engine.fusionCasts) {
+      cast.draw(canvas, paint);
+    }
+    if (engine.fusionData != null) {
+      final center = engine.player.transform.position;
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = engine.canCastFusion ? 2 : 1
+        ..color = engine.fusionData!.color.withValues(
+          alpha: engine.canCastFusion ? 0.8 : 0.3,
+        );
+      final radius = engine.player.radius + 10;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -pi / 2,
+        2 * pi * engine.fusionMeterProgress,
+        false,
+        paint,
+      );
+      if (engine.canCastFusion) {
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius + 4),
+          engine.elapsedTime * 1.5,
+          pi * 0.75,
+          false,
+          paint,
+        );
+      }
+      paint.style = PaintingStyle.fill;
+    }
     // 12. Vẽ Hạt nổ tung (Debris)
     for (final p in engine.debris) {
       p.draw(canvas, paint);
@@ -112,56 +147,22 @@ class GamePainter extends CustomPainter {
   }
 
   void _drawBackground(Canvas canvas, Size size, Paint paint) {
-    // Gradient nền tối sang trọng
-    final bgGradient = const LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+    engine.backdrop.draw(
+      canvas,
+      size,
+      Rect.fromLTWH(
+        engine.gridStartX,
+        engine.gridStartY,
+        engine.level.cols * engine.gridBlockSize,
+        engine.level.rows * engine.gridBlockSize,
+      ),
+      engine.level.theme,
+      engine.elapsedTime,
     );
-    paint.shader = bgGradient.createShader(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-    );
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-    paint.shader = null;
-
-    // Lưới grid mờ tạo chiều sâu không gian
-    paint.color = Colors.white.withValues(alpha: 0.025);
-    paint.strokeWidth = 1.0;
-    const step = 32.0;
-    for (double x = 0; x < size.width; x += step) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (double y = 0; y < size.height; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-    // Khung viền thế giới Pixel mà người chơi cần phá vỡ để thoát ra
-    final gridWidth = engine.level.cols * engine.gridBlockSize;
-    final gridHeight = engine.level.rows * engine.gridBlockSize;
-    final worldRect = Rect.fromLTWH(
-      engine.gridStartX,
-      engine.gridStartY,
-      gridWidth,
-      gridHeight,
-    );
-
-    // Nền tối phía sau bức tranh
-    paint.color = const Color(0xFF0C1322);
-    paint.style = PaintingStyle.fill;
-    canvas.drawRect(worldRect, paint);
-
-    // Tường biên giới bức tranh (Outer Barrier): Phát sáng neon chặn bóng nảy bên trong
-    paint.color = const Color(0xFF657D91).withValues(alpha: 0.65);
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 1.0;
-    canvas.drawRect(worldRect, paint);
-
-    // Hào quang viền tường ngoài
-    paint.color = const Color(0xFF657D91).withValues(alpha: 0.1);
-    paint.strokeWidth = 3.0;
-    canvas.drawRect(worldRect.inflate(2.0), paint);
   }
 
   void _drawRevealedMemeLayer(Canvas canvas, Paint paint) {
+    paint.isAntiAlias = false;
     for (final block in engine.blocks) {
       if (block.health!.isDestroyed) {
         final rect = block.transform.rect;
@@ -170,6 +171,7 @@ class GamePainter extends CustomPainter {
         canvas.drawRect(rect, paint);
       }
     }
+    paint.isAntiAlias = true;
   }
 
   void _drawWeapon(Canvas canvas, Paint paint) {

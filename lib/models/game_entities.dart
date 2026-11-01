@@ -4,14 +4,34 @@ import 'package:flutter/material.dart';
 
 import 'ecs.dart';
 import 'character.dart';
+import 'stage_theme.dart';
 
 /// Khối Pixel To (Chunky Pixel Block)
 class PixelBlock extends GameEntity {
+  // Normalized geometry is shared by every tile, rather than allocated per frame.
+  static final Path _topFacet = Path()
+    ..moveTo(0.11, 0)
+    ..lineTo(0.89, 0)
+    ..lineTo(0.85, 0.15)
+    ..lineTo(0.15, 0.15)
+    ..close();
+  static final Path _sideFacet = Path()
+    ..moveTo(1, 0.11)
+    ..lineTo(1, 0.89)
+    ..lineTo(0.85, 0.85)
+    ..lineTo(0.85, 0.15)
+    ..close();
+  static final Path _crystalFacet = Path()
+    ..moveTo(0.26, 0.22)
+    ..lineTo(0.58, 0.26)
+    ..lineTo(0.34, 0.76)
+    ..close();
   final int col;
   final int row;
   final Color memeColor;
   final bool isCenterEmpty;
   bool isRevealed = false;
+  bool isCorroded = false;
   double hitFlashTimer = 0.0;
 
   PixelBlock({
@@ -55,12 +75,13 @@ class PixelBlock extends GameEntity {
   }
 
   @override
-  void draw(Canvas canvas, Paint paint, {double time = 0}) {
+  void draw(Canvas canvas, Paint paint, {double time = 0, StageTheme? theme}) {
     if (health?.isDestroyed ?? false) return;
     final cell = transform.rect;
     final unit = cell.width;
     final rect = cell.deflate(min(0.6, unit * 0.045));
     final shape = RRect.fromRectAndRadius(rect, Radius.circular(unit * 0.09));
+    final skin = theme ?? StageTheme.all.first;
     final affinity = elementAffinity;
     final frozen = affinity?.isFrozen ?? false;
     final wet = affinity?.isSoaked ?? false;
@@ -68,9 +89,8 @@ class PixelBlock extends GameEntity {
     final poisoned = (affinity?.poisonTimer ?? 0) > 0;
     final shocked = (affinity?.shockTimer ?? 0) > 0;
     final phase = time * 2.4 + row * 0.7 + col * 1.3;
-    var face = (row + col) % 2 == 0
-        ? const Color(0xFF27384B)
-        : const Color(0xFF2C3C50);
+    final hash = (row * 37 + col * 17) % 11;
+    var face = Color.lerp(skin.tile, skin.edge, 0.1 + hash * 0.012)!;
     if (wet) face = Color.lerp(face, const Color(0xFF267A9B), 0.35)!;
     if (poisoned) face = Color.lerp(face, const Color(0xFF668A41), 0.35)!;
     if (burning) face = Color.lerp(face, const Color(0xFF9B432B), 0.48)!;
@@ -87,25 +107,127 @@ class PixelBlock extends GameEntity {
     paint
       ..shader = null
       ..maskFilter = null
-      ..style = PaintingStyle.fill
-      ..color = face;
+      ..style = PaintingStyle.fill;
+    // The low edge and broad top facet give the tile actual volume at small sizes.
+    paint.color = skin.edge;
+    canvas.drawRRect(shape.shift(Offset(0, unit * 0.055)), paint);
+    paint.color = face;
     canvas.drawRRect(shape, paint);
-    // A restrained bevel keeps the material readable underneath every status.
+    final cut = unit * 0.11;
+    canvas.save();
+    canvas.translate(rect.left, rect.top);
+    canvas.scale(rect.width, rect.height);
+    paint.color = Color.lerp(face, skin.accent, frozen ? 0.5 : 0.27)!;
+    canvas.drawPath(_topFacet, paint);
+    paint.color = Color.lerp(face, skin.edge, 0.6)!;
+    canvas.drawPath(_sideFacet, paint);
+    canvas.restore();
     paint
       ..style = PaintingStyle.stroke
-      ..strokeWidth = max(0.5, unit * 0.045)
-      ..color = Colors.white.withValues(alpha: frozen ? 0.35 : 0.12);
+      ..strokeWidth = max(0.45, unit * 0.025)
+      ..color = Colors.black.withValues(alpha: 0.25);
+    canvas.drawRRect(shape, paint);
+    paint.color = skin.accent.withValues(alpha: 0.2);
     canvas.drawLine(
-      rect.topLeft + Offset(unit * 0.12, unit * 0.08),
-      rect.topRight + Offset(-unit * 0.12, unit * 0.08),
+      rect.topLeft + Offset(cut + 1, unit * 0.08),
+      rect.topRight + Offset(-cut - 1, unit * 0.08),
       paint,
     );
-    paint.color = Colors.black.withValues(alpha: 0.22);
-    canvas.drawLine(
-      rect.bottomLeft + Offset(unit * 0.1, -unit * 0.05),
-      rect.bottomRight + Offset(-unit * 0.1, -unit * 0.05),
-      paint,
-    );
+
+    // Sparse deterministic material details; these never sample the secret picture.
+    if (unit >= 9 && !frozen) {
+      paint
+        ..style = PaintingStyle.fill
+        ..color = skin.accent.withValues(alpha: 0.07);
+      switch (skin.material) {
+        case BlockMaterial.stone:
+          canvas.drawRect(
+            Rect.fromLTWH(
+              rect.left + unit * 0.23,
+              rect.top + unit * (0.35 + hash * 0.015),
+              unit * 0.16,
+              unit * 0.05,
+            ),
+            paint,
+          );
+          if (hash % 3 == 0) {
+            canvas.drawRect(
+              Rect.fromLTWH(
+                rect.left + unit * 0.65,
+                rect.top + unit * 0.65,
+                unit * 0.08,
+                unit * 0.06,
+              ),
+              paint,
+            );
+          }
+        case BlockMaterial.moss:
+          paint.color = skin.accent.withValues(alpha: 0.1);
+          canvas.drawRect(
+            Rect.fromLTWH(
+              rect.left + unit * 0.14,
+              rect.top + unit * 0.24,
+              unit * 0.18,
+              unit * 0.1,
+            ),
+            paint,
+          );
+          canvas.drawRect(
+            Rect.fromLTWH(
+              rect.left + unit * 0.2,
+              rect.top + unit * 0.31,
+              unit * 0.08,
+              unit * 0.14,
+            ),
+            paint,
+          );
+        case BlockMaterial.alloy:
+          paint
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.6
+            ..color = skin.edge.withValues(alpha: 0.45);
+          canvas.drawLine(
+            rect.topLeft + Offset(unit * 0.24, unit * 0.72),
+            rect.topRight + Offset(-unit * 0.24, unit * 0.72),
+            paint,
+          );
+          if (hash % 4 == 0) {
+            paint
+              ..style = PaintingStyle.fill
+              ..color = skin.accent.withValues(alpha: 0.25);
+            canvas.drawCircle(
+              rect.topLeft + Offset(unit * 0.24, unit * 0.3),
+              unit * 0.035,
+              paint,
+            );
+          }
+        case BlockMaterial.crystal:
+          paint.color = skin.accent.withValues(alpha: 0.1);
+          canvas.save();
+          canvas.translate(rect.left, rect.top);
+          canvas.scale(rect.width, rect.height);
+          canvas.drawPath(_crystalFacet, paint);
+          canvas.restore();
+        case BlockMaterial.astral:
+          if (hash % 3 == 0) {
+            paint
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 0.6
+              ..color = skin.accent.withValues(alpha: 0.18);
+            final c = rect.center;
+            canvas.drawLine(
+              c - Offset(unit * 0.1, 0),
+              c + Offset(unit * 0.1, 0),
+              paint,
+            );
+            canvas.drawLine(
+              c - Offset(0, unit * 0.1),
+              c + Offset(0, unit * 0.1),
+              paint,
+            );
+          }
+      }
+    }
 
     if (wet) {
       final surface = rect.bottom - unit * (0.2 + sin(phase) * 0.04);
@@ -248,21 +370,43 @@ class PixelBlock extends GameEntity {
         paint,
       );
     }
-    if ((health?.hpPercent ?? 1) < 0.65) {
+    final hp = health?.hpPercent ?? 1;
+    if (hp < 0.75) {
+      final c = rect.center;
+      final crack = Path()
+        ..moveTo(rect.left + unit * 0.22, rect.top + unit * 0.2)
+        ..lineTo(c.dx - unit * 0.06, c.dy - unit * 0.08)
+        ..lineTo(c.dx + unit * 0.09, c.dy + unit * 0.02);
+      if (hp < 0.45) {
+        crack
+          ..lineTo(c.dx - unit * 0.06, c.dy + unit * 0.19)
+          ..lineTo(c.dx + unit * 0.12, rect.bottom - unit * 0.15);
+        crack
+          ..moveTo(c.dx + unit * 0.09, c.dy + unit * 0.02)
+          ..lineTo(rect.right - unit * 0.14, c.dy - unit * 0.12);
+      }
       paint
         ..style = PaintingStyle.stroke
-        ..strokeWidth = max(0.5, unit * 0.045)
-        ..color = const Color(0xAA0C1726);
-      canvas.drawLine(
-        rect.center + Offset(-unit * 0.2, -unit * 0.15),
-        rect.center,
-        paint,
-      );
-      canvas.drawLine(
-        rect.center,
-        rect.center + Offset(-unit * 0.06, unit * 0.27),
-        paint,
-      );
+        ..strokeWidth = max(0.65, unit * 0.055)
+        ..color = skin.edge;
+      canvas.drawPath(crack, paint);
+      if (unit >= 10 && (hitFlashTimer > 0 || hp < 0.3)) {
+        final bar = Rect.fromLTWH(
+          rect.left + unit * 0.2,
+          rect.bottom - unit * 0.19,
+          unit * 0.55,
+          max(0.7, unit * 0.045),
+        );
+        paint
+          ..style = PaintingStyle.fill
+          ..color = Colors.black.withValues(alpha: 0.3);
+        canvas.drawRect(bar, paint);
+        paint.color = skin.accent.withValues(alpha: 0.5);
+        canvas.drawRect(
+          Rect.fromLTWH(bar.left, bar.top, bar.width * hp, bar.height),
+          paint,
+        );
+      }
     }
     paint.style = PaintingStyle.fill;
   }
@@ -698,6 +842,9 @@ class MistZone {
 
 /// Tinh Linh Hộ Vệ bay xoay quanh Quả cầu người chơi
 class OrbitingSpirit {
+  static const contactCooldown = 0.65;
+  static const damageRatio = 0.55;
+  double hitCooldown = 0;
   final String id;
   ElementType element;
   double orbitRadius;
@@ -718,6 +865,7 @@ class OrbitingSpirit {
   });
 
   void update(double dt, Offset center) {
+    hitCooldown = max(0, hitCooldown - dt);
     angle += orbitSpeed * dt;
     if (angle > 2 * pi) angle -= 2 * pi;
 

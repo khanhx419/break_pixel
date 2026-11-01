@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'stage_theme.dart';
+
 class MemeLevel {
+  final int? themeIndex;
+  StageTheme get theme =>
+      StageTheme.all[(themeIndex ?? (id - 1)) % StageTheme.all.length];
   final int id;
   final String title;
   final String memeName;
@@ -10,6 +15,7 @@ class MemeLevel {
 
   const MemeLevel({
     required this.id,
+    this.themeIndex,
     required this.title,
     required this.memeName,
     required this.cols,
@@ -17,11 +23,34 @@ class MemeLevel {
     required this.colorGrid,
   });
 
-  static List<MemeLevel> get allLevels => [
-    _finePixels(_createDogeLevel()),
-    _finePixels(_createPepeLevel()),
-    _finePixels(_createPopcatLevel()),
-  ];
+  static List<MemeLevel> get allLevels {
+    final originals = [
+      _createDogeLevel(),
+      _createPepeLevel(),
+      _createPopcatLevel(),
+    ];
+    return List.generate(9, (index) {
+      final source = originals[index % originals.length];
+      final side = 28 + (index ~/ 3) * 4;
+      return MemeLevel(
+        id: index + 1,
+        title: 'Màn ${index + 1}: ${source.memeName}',
+        memeName: source.memeName,
+        cols: side,
+        rows: side,
+        colorGrid: List.generate(
+          side,
+          (row) => List.generate(
+            side,
+            (col) =>
+                source.colorGrid[row * source.rows ~/ side][col *
+                    source.cols ~/
+                    side],
+          ),
+        ),
+      );
+    });
+  }
 
   static const int maxEndlessSide = 48;
 
@@ -32,6 +61,7 @@ class MemeLevel {
     final side = (28 + (wave - 1) * 4).clamp(28, maxEndlessSide);
     return MemeLevel(
       id: 1,
+      themeIndex: (wave - 1) % StageTheme.all.length,
       title: 'Vô tận · Đợt $wave',
       memeName: source.memeName,
       cols: side,
@@ -48,23 +78,6 @@ class MemeLevel {
       ),
     );
   }
-
-  // Each artwork pixel becomes four independently breakable tiles.
-  // Preserve the original palette exactly in the revealed image.
-  static MemeLevel _finePixels(MemeLevel source) => MemeLevel(
-    id: source.id,
-    title: source.title,
-    memeName: source.memeName,
-    cols: source.cols * 2,
-    rows: source.rows * 2,
-    colorGrid: List.generate(
-      source.rows * 2,
-      (row) => List.generate(
-        source.cols * 2,
-        (col) => source.colorGrid[row ~/ 2][col ~/ 2],
-      ),
-    ),
-  );
 
   /// Level 1: Doge Pixel Meme (14x14 Chunky Grid)
   static MemeLevel _createDogeLevel() {

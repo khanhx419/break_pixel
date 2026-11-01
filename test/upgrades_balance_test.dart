@@ -27,6 +27,7 @@ void main() {
       for (final spec in UpgradeSpec.all) {
         final paid = create()..gold = 100000;
         final free = create();
+        paid.totalDestroyedBlocks = free.totalDestroyedBlocks = 100;
         expect(paid.purchaseUpgrade(spec.type), isTrue);
         expect(free.grantUpgrade(spec.type), isTrue);
         expect(paid.upgradeRank(spec.type), free.upgradeRank(spec.type));

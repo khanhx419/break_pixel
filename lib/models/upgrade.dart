@@ -9,6 +9,7 @@ enum UpgradeType {
   spin,
   spirit,
   resonance,
+  fusionCooldown,
 }
 
 class UpgradeSpec {
@@ -87,7 +88,7 @@ class UpgradeSpec {
     UpgradeSpec(
       UpgradeType.spirit,
       'Tinh linh hộ vệ',
-      'Thêm một vệ tinh; chia đều quỹ đạo, tối đa 4 tinh linh.',
+      'Thêm 1 vệ tinh. Mỗi tinh linh gây 55% sát thương mỗi đòn chạm, hồi đánh 0,65s; tối đa 4.',
       4,
       100,
       Icons.blur_circular,
@@ -101,6 +102,15 @@ class UpgradeSpec {
       70,
       Icons.auto_awesome,
       Color(0xFFD5ABE9),
+    ),
+    UpgradeSpec(
+      UpgradeType.fusionCooldown,
+      'Điều tiết dung hợp',
+      'Mở sau 100 khối. Giảm hồi chiêu kỹ năng 1 giây mỗi bậc: 10 → 9 → 8 → 7 giây.',
+      3,
+      120,
+      Icons.hourglass_bottom,
+      Color(0xFFC6ADE8),
     ),
   ];
 

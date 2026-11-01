@@ -8,10 +8,13 @@ import '../models/element.dart';
 import '../models/pixel_art_data.dart';
 import '../models/game_entities.dart';
 import '../models/upgrade.dart';
+import '../models/fusion_cast.dart';
 import '../core/audio_service.dart';
 import '../core/bounded_list.dart';
+import 'stage_backdrop.dart';
 
 class GameEngine extends ChangeNotifier {
+  final StageBackdrop backdrop = StageBackdrop();
   late PlayerBall player;
   RoleInfo role;
   RaceInfo race;
@@ -39,7 +42,6 @@ class GameEngine extends ChangeNotifier {
   double _hitSoundCooldown = 0;
   double _breakSoundCooldown = 0;
   double _coinSoundCooldown = 0;
-  double _fusionCooldown = 0;
   int _particlesThisFrame = 0;
   int _breakRingsThisFrame = 0;
 
@@ -62,7 +64,50 @@ class GameEngine extends ChangeNotifier {
   final Set<ElementType> ownedElements = {};
   final Set<ElementType> equippedElements = {};
   static const maxEquippedElements = 3;
+  // Research collection; only the equipped recipe can be cast.
   final Set<ElementType> activeFusions = {};
+  ElementType? selectedFusion;
+  static const fusionUnlockBlocks = 100;
+  int totalDestroyedBlocks = 0;
+  bool get isFusionUnlocked => totalDestroyedBlocks >= fusionUnlockBlocks;
+  double get fusionEnergy =>
+      min(fusionUnlockBlocks, totalDestroyedBlocks).toDouble();
+  double fusionEnergyFor(ElementType type) => fusionEnergy;
+  int fusionCooldownUpgradeLevel = 0;
+  double get fusionCooldownDuration =>
+      (10 - fusionCooldownUpgradeLevel).clamp(7, 10).toDouble();
+  double fusionCooldown = 0;
+  double get fusionMeterProgress => !isFusionUnlocked
+      ? fusionEnergy / 100
+      : (1 - fusionCooldown / fusionCooldownDuration).clamp(0.0, 1.0);
+  double get spiritHitDamage => totalDamage * OrbitingSpirit.damageRatio;
+  FusionCast? pendingFusion;
+  final List<FusionCast> fusionCasts = BoundedList(3);
+  ElementData? get fusionData => selectedFusion == null
+      ? null
+      : ElementData.fusionElements.firstWhere(
+          (data) => data.type == selectedFusion,
+        );
+  bool get hasFusionIngredients =>
+      fusionData?.ingredients?.every(equippedElements.contains) ?? false;
+  bool get canCastFusion =>
+      !isLevelCompleted &&
+      isGridBuilt &&
+      selectedFusion != null &&
+      hasFusionIngredients &&
+      isFusionUnlocked &&
+      fusionCooldown <= 0 &&
+      pendingFusion == null;
+  String get fusionStatus => pendingFusion != null
+      ? 'Đang kết ấn…'
+      : !hasFusionIngredients
+      ? 'Cần trang bị 2 nguyên tố thành phần'
+      : fusionCooldown > 0
+      ? 'Hồi ${fusionCooldown.toStringAsFixed(1)}s'
+      : !isFusionUnlocked
+      ? 'Mở kỹ năng: ${fusionEnergy.floor()}/100 khối đã phá'
+      : 'Sẵn sàng · Chạm khối để ngắm';
+  double get fusionDamage => elementDamage * 2.6;
 
   // Kinh tế & Tiến trình
   int gold = 0;
@@ -93,13 +138,6 @@ class GameEngine extends ChangeNotifier {
   double _fireBurstCooldown = 0.0;
   double _lightningCooldown = 0.0;
   double _firestormTimer = 0.0;
-  double _permafrostCooldown = 0.0;
-  double _superconductorCooldown = 0.0;
-  double _explosiveGasCooldown = 0.0;
-  double _acidMeltCooldown = 0.0;
-  double _avalancheCooldown = 0.0;
-  double _voidVortexCooldown = 0.0;
-  double _lavaBurstCooldown = 0.0;
 
   double get weaponSpinSpeedMultiplier =>
       (1.0 + min(spinUpgradeLevel, 8) * 0.18) *
@@ -108,7 +146,6 @@ class GameEngine extends ChangeNotifier {
           : 1.0);
 
   final Map<String, double> _elementHitTimers = {};
-  double _mistCooldown = 0;
   bool get isFirestormActive => _firestormTimer > 0;
 
   // Lực hút nam châm cơ bản
@@ -250,6 +287,15 @@ class GameEngine extends ChangeNotifier {
       for (final vortex in vortexZones) {
         vortex.center = remap(vortex.center);
       }
+      for (final cast in fusionCasts) {
+        cast.center = remap(cast.center);
+        cast.board = Rect.fromLTWH(
+          gridStartX,
+          gridStartY,
+          gridWidth,
+          gridHeight,
+        );
+      }
       player.trail.clear();
       for (final spirit in spirits) {
         spirit.trail.clear();
@@ -363,7 +409,7 @@ class GameEngine extends ChangeNotifier {
     // HP cơ sở cao hơn để trận đấu kéo dài hơn
     double baseHp = isEndless
         ? 50 * (1 + log(endlessWave) * 0.35)
-        : 50.0 + (level.id - 1) * 20.0;
+        : 50.0 * pow(1.16, level.id - 1);
     // Tính khoảng cách từ tâm (khối ở rìa ngoài trâu hơn)
     final centerRow = (totalRows - 1) / 2.0;
     final centerCol = (totalCols - 1) / 2.0;
@@ -390,6 +436,15 @@ class GameEngine extends ChangeNotifier {
       if (isEndless) {
         _waveWait = 1.4;
       } else {
+        // Bank uncollected loot before saving the completed story stage.
+        for (final drop in drops) {
+          if (drop.type == DropType.gold) {
+            gold += drop.value.toInt();
+          } else {
+            addExp(drop.value);
+          }
+        }
+        drops.clear();
         AudioService.playVictory();
         onVictory?.call();
       }
@@ -400,6 +455,16 @@ class GameEngine extends ChangeNotifier {
     if (!dt.isFinite || dt <= 0 || !isGridBuilt) return;
     final elapsed = min(dt, 0.1);
     elapsedTime += elapsed;
+    fusionCooldown = max(0, fusionCooldown - elapsed);
+    for (final cast in fusionCasts) {
+      cast.age += elapsed;
+    }
+    if (pendingFusion != null && pendingFusion!.age >= FusionCast.windup) {
+      final cast = pendingFusion!;
+      pendingFusion = null;
+      if (!isLevelCompleted) _resolveFusion(cast);
+    }
+    fusionCasts.removeWhere((cast) => cast.age >= cast.duration);
     _hudTimer += elapsed;
     _cameraSettle = max(0, _cameraSettle - elapsed * 1.5);
     _particlesThisFrame = 0;
@@ -434,6 +499,8 @@ class GameEngine extends ChangeNotifier {
 
   void _resetBoardState() {
     dashCooldown = 0;
+    pendingFusion = null;
+    fusionCasts.clear();
     projectileAimAngle = null;
     _impactCooldown = 0;
     // Collect outstanding rewards before replacing the board.
@@ -456,11 +523,7 @@ class GameEngine extends ChangeNotifier {
     _elementHitTimers.clear();
     impacts.clear();
     _firestormTimer = 0;
-    _fireBurstCooldown = _lightningCooldown = _mistCooldown = 0;
-    _permafrostCooldown = _superconductorCooldown = _explosiveGasCooldown = 0;
-    _acidMeltCooldown = _avalancheCooldown = _voidVortexCooldown =
-        _lavaBurstCooldown = 0;
-    _fusionCooldown = 0.6;
+    _fireBurstCooldown = _lightningCooldown = 0;
     screenShake = 0;
     shakeOffset = Offset.zero;
     player.trail.clear();
@@ -521,6 +584,7 @@ class GameEngine extends ChangeNotifier {
 
   @override
   void dispose() {
+    backdrop.dispose();
     hudRevision.dispose();
     super.dispose();
   }
@@ -529,8 +593,6 @@ class GameEngine extends ChangeNotifier {
     if (isLevelCompleted || !isGridBuilt || dt <= 0) return;
     dt = min(dt, 0.05);
     _elementHitTimers.updateAll((key, value) => max(0.0, value - dt));
-    _mistCooldown = max(0.0, _mistCooldown - dt);
-    _fusionCooldown = max(0.0, _fusionCooldown - dt);
     _hitSoundCooldown = max(0.0, _hitSoundCooldown - dt);
     _breakSoundCooldown = max(0.0, _breakSoundCooldown - dt);
     _coinSoundCooldown = max(0.0, _coinSoundCooldown - dt);
@@ -550,13 +612,6 @@ class GameEngine extends ChangeNotifier {
     // Giảm cooldown các hiệu ứng nguyên tố
     if (_fireBurstCooldown > 0) _fireBurstCooldown -= dt;
     if (_lightningCooldown > 0) _lightningCooldown -= dt;
-    if (_permafrostCooldown > 0) _permafrostCooldown -= dt;
-    if (_superconductorCooldown > 0) _superconductorCooldown -= dt;
-    if (_explosiveGasCooldown > 0) _explosiveGasCooldown -= dt;
-    if (_acidMeltCooldown > 0) _acidMeltCooldown -= dt;
-    if (_avalancheCooldown > 0) _avalancheCooldown -= dt;
-    if (_voidVortexCooldown > 0) _voidVortexCooldown -= dt;
-    if (_lavaBurstCooldown > 0) _lavaBurstCooldown -= dt;
     if (_firestormTimer > 0) {
       _firestormTimer -= dt;
       _updateFirestormAura(dt);
@@ -587,22 +642,43 @@ class GameEngine extends ChangeNotifier {
     final pCenter = player.transform.position;
     for (final spirit in spirits) {
       spirit.update(dt, pCenter);
-      final sPos = spirit.getPosition(pCenter);
-      for (final b in _blocksInRect(
-        Rect.fromCircle(center: sPos, radius: spirit.size),
+      if (spirit.hitCooldown > 0) continue;
+      final pos = spirit.getPosition(pCenter);
+      for (final block in _blocksInRect(
+        Rect.fromCircle(center: pos, radius: spirit.size),
       )) {
-        if (b.transform.rect.inflate(spirit.size * 0.5).contains(sPos)) {
-          _damageBlock(b, totalDamage * 0.8 * dt * 5.0, 'TINH LINH');
-          if (spirit.element == ElementType.fire) {
-            b.elementAffinity?.applyFire(2.5, elementDamage * 0.25);
-          } else if (spirit.element == ElementType.frost) {
-            b.elementAffinity?.applyFrost(3.0);
-          } else if (spirit.element == ElementType.lightning) {
-            b.elementAffinity?.applyShock(1.2);
-          } else if (spirit.element == ElementType.poison) {
-            b.elementAffinity?.applyPoison(3.0, elementDamage * 0.2);
+        final rect = block.transform.rect;
+        final nearest = Offset(
+          pos.dx.clamp(rect.left, rect.right),
+          pos.dy.clamp(rect.top, rect.bottom),
+        );
+        if ((pos - nearest).distanceSquared > spirit.size * spirit.size) {
+          continue;
+        }
+        spirit.hitCooldown = OrbitingSpirit.contactCooldown;
+        block.hitFlashTimer = 0.1;
+        _damageBlock(block, spiritHitDamage, 'TINH LINH');
+        if (!block.health!.isDestroyed) {
+          switch (spirit.element) {
+            case ElementType.fire:
+              block.elementAffinity?.applyFire(2.5, elementDamage * 0.25);
+            case ElementType.frost:
+              block.elementAffinity?.applyFrost(3);
+            case ElementType.lightning:
+              block.elementAffinity?.applyShock(1.2);
+            case ElementType.poison:
+              block.elementAffinity?.applyPoison(3, elementDamage * 0.2);
+            default:
+              break;
           }
         }
+        if (_impactCooldown <= 0) {
+          impacts.add(
+            ElementImpact(center: nearest, element: spirit.element, radius: 12),
+          );
+          _impactCooldown = 0.065;
+        }
+        break; // A spirit hits one tile per contact beat, regardless of frame rate.
       }
     }
 
@@ -628,7 +704,7 @@ class GameEngine extends ChangeNotifier {
           ),
         );
         block.elementAffinity?.applyShock(1.0);
-        if (block.takeDamage(totalDamage * 0.22)) _onBlockDestroyed(block);
+        if (block.takeDamage(fusionDamage * 0.22)) _onBlockDestroyed(block);
       }
       for (final drop in drops) {
         final offset = vortex.center - drop.transform.position;
@@ -1098,103 +1174,6 @@ class GameEngine extends ChangeNotifier {
         );
         _impactCooldown = 0.065;
       }
-      // === CÁC DUNG HỢP NGUYÊN TỐ (FUSIONS) ===
-      // 1. Sương Mù (Mist) — Hỏa + Thủy
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.mist) &&
-          _mistCooldown <= 0 &&
-          _random.nextDouble() < 0.06) {
-        _fusionCooldown = 0.6;
-        mistZones.add(
-          MistZone(
-            center: block.transform.position,
-            damagePerSec: elementDamage * 0.45,
-          ),
-        );
-        _mistCooldown = 2.5;
-      }
-
-      // 2. Nhiễm Điện (Chain Lightning) — Thủy + Lôi
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.chainLightning) &&
-          _lightningCooldown <= 0 &&
-          (block.elementAffinity?.isSoaked ?? false)) {
-        _triggerChainLightning(block);
-        _lightningCooldown = 2.5;
-      }
-
-      // 3. Bão Lửa (Firestorm) — Hỏa + Phong
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.firestorm) &&
-          _firestormTimer <= 0 &&
-          _random.nextDouble() < 0.08) {
-        _triggerFirestorm();
-      }
-
-      // 4. Băng Vĩnh Cửu (Permafrost) — Thủy + Băng
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.permafrost) &&
-          _permafrostCooldown <= 0 &&
-          _random.nextDouble() < 0.08) {
-        _triggerPermafrost(block);
-        _permafrostCooldown = 3.5;
-      }
-
-      // 5. Siêu Dẫn (Superconductor) — Băng + Lôi
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.superconductor) &&
-          _superconductorCooldown <= 0 &&
-          (block.elementAffinity?.isFrozen ?? false)) {
-        _triggerSuperconductor(block);
-        _superconductorCooldown = 3.0;
-      }
-
-      // 6. Khí Nổ (Explosive Gas) — Độc + Hỏa
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.explosiveGas) &&
-          _explosiveGasCooldown <= 0 &&
-          ((block.elementAffinity?.burnTimer ?? 0) > 0 ||
-              (block.elementAffinity?.poisonTimer ?? 0) > 0) &&
-          _random.nextDouble() < 0.08) {
-        _triggerExplosiveGas(block);
-        _explosiveGasCooldown = 3.5;
-      }
-
-      // 7. Axit Ăn Mòn (Acid Melt) — Độc + Thủy
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.acidMelt) &&
-          _acidMeltCooldown <= 0 &&
-          _random.nextDouble() < 0.10) {
-        _triggerAcidMelt(block);
-        _acidMeltCooldown = 2.0;
-      }
-
-      // 8. Lở Tuyết (Avalanche) — Băng + Địa
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.avalanche) &&
-          _avalancheCooldown <= 0 &&
-          _random.nextDouble() < 0.05) {
-        _triggerAvalanche(block);
-        _avalancheCooldown = 4.5;
-      }
-
-      // 9. Hố Đen Lôi Đình (Void Vortex) — Bóng Tối + Lôi
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.voidVortex) &&
-          _voidVortexCooldown <= 0 &&
-          _random.nextDouble() < 0.06) {
-        _triggerVoidVortex(block);
-        _voidVortexCooldown = 4.0;
-      }
-
-      // 10. Dung Nham (Lava Burst) — Hỏa + Địa
-      if (_fusionCooldown <= 0 &&
-          activeFusions.contains(ElementType.lavaBurst) &&
-          _lavaBurstCooldown <= 0 &&
-          _random.nextDouble() < 0.08) {
-        _triggerLavaBurst(block);
-        _lavaBurstCooldown = 3.0;
-      }
     }
     // Chớp sáng trắng khi bị đánh trúng & Rung cực nhẹ (tinh tế, không gây nhức mắt)
     if (triggerElements) block.hitFlashTimer = 0.1;
@@ -1282,7 +1261,6 @@ class GameEngine extends ChangeNotifier {
   }
 
   void _triggerChainLightning(PixelBlock origin) {
-    _fusionCooldown = 0.6;
     AudioService.playLightning();
     final visited = <PixelBlock>{origin};
     final queue = <PixelBlock>[origin];
@@ -1316,14 +1294,13 @@ class GameEngine extends ChangeNotifier {
           ),
         );
         block.elementAffinity?.applyShock(1.5);
-        if (block.takeDamage(elementDamage * 0.9)) _onBlockDestroyed(block);
+        if (block.takeDamage(fusionDamage * 0.9)) _onBlockDestroyed(block);
       }
     }
   }
 
   // === BÃO LỬA (Firestorm) — Hỏa + Phong: Lốc xoáy lửa thiêu rụi các khối quanh bóng ===
   void _triggerFirestorm() {
-    _fusionCooldown = 0.6;
     final center = player.transform.position;
     floatingTexts.add(
       FloatingText(
@@ -1340,8 +1317,8 @@ class GameEngine extends ChangeNotifier {
     for (final b in blocks) {
       if (b.health!.isDestroyed) continue;
       if ((b.transform.position - center).distance < 90) {
-        b.elementAffinity?.applyFire(3.5, elementDamage * 0.35);
-        final killed = b.takeDamage(elementDamage * 0.4);
+        b.elementAffinity?.applyFire(3.5, fusionDamage * 0.35);
+        final killed = b.takeDamage(fusionDamage * 0.4);
         if (killed) _onBlockDestroyed(b);
         count++;
         if (count >= 10) break;
@@ -1360,7 +1337,6 @@ class GameEngine extends ChangeNotifier {
         duration: 0.6,
       ),
     );
-    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '❄️ BĂNG VĨNH CỬU!',
@@ -1389,7 +1365,6 @@ class GameEngine extends ChangeNotifier {
 
   // === SIÊU DẪN (Superconductor) — Băng + Lôi: Phóng điện trường lạnh nổ lan xuyên giáp ===
   void _triggerSuperconductor(PixelBlock origin) {
-    _fusionCooldown = 0.6;
     AudioService.playLightning();
     floatingTexts.add(
       FloatingText(
@@ -1412,7 +1387,7 @@ class GameEngine extends ChangeNotifier {
         );
         b.elementAffinity?.applyFrost(3.0);
         b.elementAffinity?.applyShock(2.0);
-        final killed = b.takeDamage(elementDamage * 1.0);
+        final killed = b.takeDamage(fusionDamage * 1.0);
         if (killed) _onBlockDestroyed(b);
         count++;
         if (count >= 6) break;
@@ -1430,7 +1405,6 @@ class GameEngine extends ChangeNotifier {
         duration: 0.6,
       ),
     );
-    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '💥☠️ KHÍ NỔ!',
@@ -1448,8 +1422,8 @@ class GameEngine extends ChangeNotifier {
       final dist = (b.transform.position - origin.transform.position).distance;
       if (dist < 100) {
         final dmgFalloff = 1.0 - (dist / 100.0);
-        final killed = b.takeDamage(elementDamage * 1.3 * dmgFalloff);
-        b.elementAffinity?.applyFire(2.0, elementDamage * 0.25);
+        final killed = b.takeDamage(fusionDamage * 1.3 * dmgFalloff);
+        b.elementAffinity?.applyFire(2.0, fusionDamage * 0.25);
         if (killed) _onBlockDestroyed(b);
       }
     }
@@ -1465,7 +1439,6 @@ class GameEngine extends ChangeNotifier {
         duration: 0.6,
       ),
     );
-    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '🧪 AXIT!',
@@ -1474,21 +1447,19 @@ class GameEngine extends ChangeNotifier {
         color: Colors.greenAccent,
       ),
     );
-    target.health!.maxHp *= 0.75;
-    if (target.health!.currentHp > target.health!.maxHp) {
-      target.health!.currentHp = target.health!.maxHp;
-    }
-    target.elementAffinity?.applyPoison(5.0, elementDamage * 0.25);
-    int count = 0;
-    for (final b in blocks) {
-      if (b == target || b.health!.isDestroyed) continue;
-      if ((b.transform.position - target.transform.position).distance < 50) {
-        b.health!.maxHp *= 0.75;
-        b.health!.currentHp = min(b.health!.currentHp, b.health!.maxHp);
-        b.elementAffinity?.applyPoison(3.0, elementDamage * 0.15);
-        count++;
-        if (count >= 2) break;
+    for (final block in _blocksNear(
+      target.transform.position,
+      gridBlockSize * 1.6,
+    ).take(9)) {
+      if (!block.isCorroded) {
+        block.isCorroded = true;
+        block.health!.maxHp *= 0.75;
+        block.health!.currentHp = min(
+          block.health!.currentHp,
+          block.health!.maxHp,
+        );
       }
+      block.elementAffinity?.applyPoison(5, fusionDamage * 0.25);
     }
   }
 
@@ -1502,7 +1473,6 @@ class GameEngine extends ChangeNotifier {
         duration: 0.6,
       ),
     );
-    _fusionCooldown = 0.6;
     shockwaves.add(
       ShockwaveRing(center: origin.transform.position, color: Colors.white),
     );
@@ -1519,7 +1489,7 @@ class GameEngine extends ChangeNotifier {
       if (b.health!.isDestroyed) continue;
       if (b.row == origin.row) {
         b.elementAffinity?.applyFrost(2.5);
-        final killed = b.takeDamage(elementDamage * 0.85);
+        final killed = b.takeDamage(fusionDamage * 0.85);
         if (killed) _onBlockDestroyed(b);
       }
     }
@@ -1527,7 +1497,6 @@ class GameEngine extends ChangeNotifier {
 
   // === HỐ ĐEN LÔI ĐÌNH (Void Vortex) — Bóng Tối + Lôi: Hút tụ khối và giật sét ===
   void _triggerVoidVortex(PixelBlock origin) {
-    _fusionCooldown = 0.6;
     vortexZones.add(VoidVortexZone(origin.transform.position));
     AudioService.playLightning();
     floatingTexts.add(
@@ -1556,7 +1525,7 @@ class GameEngine extends ChangeNotifier {
           ),
         );
         b.elementAffinity?.applyShock(2.0);
-        final killed = b.takeDamage(elementDamage * 0.85);
+        final killed = b.takeDamage(fusionDamage * 0.85);
         if (killed) _onBlockDestroyed(b);
         count++;
         if (count >= 7) break;
@@ -1574,7 +1543,6 @@ class GameEngine extends ChangeNotifier {
         duration: 0.6,
       ),
     );
-    _fusionCooldown = 0.6;
     floatingTexts.add(
       FloatingText(
         text: '🌋 DUNG NHAM!',
@@ -1591,15 +1559,28 @@ class GameEngine extends ChangeNotifier {
       if (b.health!.isDestroyed) continue;
       final dist = (b.transform.position - origin.transform.position).distance;
       if (dist < 80) {
-        b.elementAffinity?.applyFire(4.0, elementDamage * 0.4);
-        final killed = b.takeDamage(elementDamage * 0.55);
+        b.elementAffinity?.applyFire(4.0, fusionDamage * 0.4);
+        final killed = b.takeDamage(fusionDamage * 0.55);
         if (killed) _onBlockDestroyed(b);
       }
     }
   }
 
   void _onBlockDestroyed(PixelBlock block) {
+    if (block.isCenterEmpty || block.isRevealed) return;
     block.isRevealed = true;
+    totalDestroyedBlocks++;
+    if (totalDestroyedBlocks == fusionUnlockBlocks) {
+      floatingTexts.add(
+        FloatingText(
+          text: 'ĐÃ MỞ KỸ NĂNG DUNG HỢP',
+          x: player.transform.x,
+          y: player.transform.y - 30,
+          color: const Color(0xFFCAB1F2),
+        ),
+      );
+      hudRevision.value++;
+    }
 
     // Kích hoạt Rung giật màn hình vừa vặn (2.5px), sóng xung kích và âm thanh nổ vỡ
     screenShake = max(screenShake, 0.7);
@@ -1860,6 +1841,131 @@ class GameEngine extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool selectFusion(ElementType type) {
+    if (!activeFusions.contains(type) || pendingFusion != null) return false;
+    final data = ElementData.fusionElements
+        .where((data) => data.type == type)
+        .firstOrNull;
+    if (data == null || !data.ingredients!.every(ownedElements.contains)) {
+      return false;
+    }
+    if (selectedFusion == type) return true;
+    final extra = equippedElements
+        .where((el) => !data.ingredients!.contains(el))
+        .firstOrNull;
+    equippedElements
+      ..clear()
+      ..addAll(data.ingredients!);
+    if (extra != null) equippedElements.add(extra);
+    selectedFusion = type;
+    hudRevision.value++;
+    notifyListeners();
+    return true;
+  }
+
+  bool _validFusionTarget(PixelBlock block, ElementType type) => switch (type) {
+    ElementType.chainLightning ||
+    ElementType.acidMelt => block.elementAffinity!.isSoaked,
+    ElementType.superconductor => block.elementAffinity!.isFrozen,
+    ElementType.explosiveGas => block.elementAffinity!.poisonTimer > 0,
+    _ => true,
+  };
+
+  PixelBlock? fusionTarget([Offset? point]) {
+    final candidates = _blocksNear(player.transform.position, 180)
+        .where(
+          (block) =>
+              _validFusionTarget(block, selectedFusion ?? ElementType.none),
+        )
+        .toList();
+    final aim = point ?? player.transform.position;
+    candidates.sort(
+      (a, b) => (a.transform.position - aim).distanceSquared.compareTo(
+        (b.transform.position - aim).distanceSquared,
+      ),
+    );
+    if (point != null &&
+        ((point - player.transform.position).distance > 180 ||
+            candidates.isEmpty ||
+            (candidates.first.transform.position - point).distance >
+                gridBlockSize * 1.5)) {
+      return null;
+    }
+    return candidates.firstOrNull;
+  }
+
+  bool castFusion([Offset? point]) {
+    if (!canCastFusion) return false;
+    final target = fusionTarget(point);
+    if (target == null) return false;
+    fusionCooldown = fusionCooldownDuration;
+    final cast = FusionCast(
+      type: selectedFusion!,
+      center: selectedFusion == ElementType.firestorm
+          ? player.transform.position
+          : target.transform.position,
+      color: fusionData!.color,
+      targetId: target.id,
+      board: Rect.fromLTWH(
+        gridStartX,
+        gridStartY,
+        level.cols * gridBlockSize,
+        level.rows * gridBlockSize,
+      ),
+    );
+    pendingFusion = cast;
+    fusionCasts.add(cast);
+    hudRevision.value++;
+    notifyListeners();
+    return true;
+  }
+
+  void _resolveFusion(FusionCast cast) {
+    final origin = blocks
+        .where((block) => block.id == cast.targetId)
+        .firstOrNull;
+    if (origin == null) return;
+    switch (cast.type) {
+      case ElementType.mist:
+        mistZones.add(
+          MistZone(center: cast.center, damagePerSec: fusionDamage * 0.3),
+        );
+      case ElementType.chainLightning:
+        _triggerChainLightning(origin);
+      case ElementType.firestorm:
+        _triggerFirestorm();
+      case ElementType.permafrost:
+        _triggerPermafrost(origin);
+      case ElementType.superconductor:
+        _triggerSuperconductor(origin);
+      case ElementType.explosiveGas:
+        _triggerExplosiveGas(origin);
+      case ElementType.acidMelt:
+        _triggerAcidMelt(origin);
+      case ElementType.avalanche:
+        _triggerAvalanche(origin);
+      case ElementType.voidVortex:
+        _triggerVoidVortex(origin);
+      case ElementType.lavaBurst:
+        _triggerLavaBurst(origin);
+      default:
+        break;
+    }
+    floatingTexts.add(
+      FloatingText(
+        text: ElementData.fusionElements
+            .firstWhere((data) => data.type == cast.type)
+            .name
+            .split(' (')
+            .first
+            .toUpperCase(),
+        x: cast.center.dx,
+        y: cast.center.dy - 24,
+        color: cast.color,
+      ),
+    );
+  }
+
   // Thực hiện Dung hợp nguyên tố
   bool fuseElements(ElementType a, ElementType b) {
     final fusion = ElementData.findFusion(a, b);
@@ -1868,6 +1974,7 @@ class GameEngine extends ChangeNotifier {
         ownedElements.contains(b) &&
         !activeFusions.contains(fusion.type)) {
       activeFusions.add(fusion.type);
+      if (selectedFusion == null) selectFusion(fusion.type);
       notifyListeners();
       return true;
     }
@@ -1883,7 +1990,11 @@ class GameEngine extends ChangeNotifier {
     UpgradeType.spin => spinUpgradeLevel,
     UpgradeType.spirit => spirits.length,
     UpgradeType.resonance => resonanceUpgradeLevel,
+    UpgradeType.fusionCooldown => fusionCooldownUpgradeLevel,
   };
+
+  bool upgradeAvailable(UpgradeType type) =>
+      type != UpgradeType.fusionCooldown || isFusionUnlocked;
 
   bool canImprove(UpgradeType type) =>
       upgradeRank(type) < UpgradeSpec.of(type).maxRank;
@@ -1918,14 +2029,16 @@ class GameEngine extends ChangeNotifier {
         '${(80 + rank * 22)} → ${(80 + next * 22)} bán kính hút',
       UpgradeType.spin =>
         'x${(1 + rank * 0.18).toStringAsFixed(2)} → x${(1 + next * 0.18).toStringAsFixed(2)} tốc xoay',
-      UpgradeType.spirit => '$rank → $next tinh linh',
+      UpgradeType.spirit =>
+        '$rank → $next tinh linh · ${spiritHitDamage.toStringAsFixed(1)} sát thương/đòn',
+      UpgradeType.fusionCooldown => '${10 - rank}s → ${10 - next}s hồi chiêu',
       UpgradeType.resonance =>
         'x${(1 + rank * 0.1).toStringAsFixed(2)} → x${(1 + next * 0.1).toStringAsFixed(2)} nguyên tố',
     };
   }
 
   bool grantUpgrade(UpgradeType type) {
-    if (!canImprove(type)) return false;
+    if (!canImprove(type) || !upgradeAvailable(type)) return false;
     final oldSpeed = normalBallSpeed;
     switch (type) {
       case UpgradeType.damage:
@@ -1944,6 +2057,9 @@ class GameEngine extends ChangeNotifier {
         summonSpirit();
       case UpgradeType.resonance:
         resonanceUpgradeLevel++;
+      case UpgradeType.fusionCooldown:
+        fusionCooldownUpgradeLevel++;
+        fusionCooldown = min(fusionCooldown, fusionCooldownDuration);
     }
     if (type == UpgradeType.bounce) {
       player.transform.vx *= normalBallSpeed / oldSpeed;
@@ -1963,7 +2079,7 @@ class GameEngine extends ChangeNotifier {
   }
 
   bool purchaseUpgrade(UpgradeType type) {
-    if (!canImprove(type)) return false;
+    if (!canImprove(type) || !upgradeAvailable(type)) return false;
     final cost = upgradeCost(type);
     if (gold < cost) return false;
     gold -= cost;
@@ -1977,4 +2093,268 @@ class GameEngine extends ChangeNotifier {
   bool upgradeMagnet() => purchaseUpgrade(UpgradeType.magnet);
   bool upgradeSpin() => purchaseUpgrade(UpgradeType.spin);
   bool upgradeSpirit() => purchaseUpgrade(UpgradeType.spirit);
+  Map<String, dynamic> exportBuild() => {
+    'gold': gold,
+    'exp': exp,
+    'expNext': expToNextLevel,
+    'characterLevel': characterLevel,
+    'kills': totalDestroyedBlocks,
+    'upgrades': {
+      for (final type in UpgradeType.values) type.name: upgradeRank(type),
+    },
+    'elements': ownedElements.map((e) => e.name).toList(),
+    'equipped': equippedElements.map((e) => e.name).toList(),
+    'fusions': activeFusions.map((e) => e.name).toList(),
+    'selected': selectedFusion?.name,
+  };
+
+  void restoreBuild(Map<String, dynamic> data) {
+    double number(dynamic value, double fallback, double upper) =>
+        value is num && value.isFinite
+        ? value.toDouble().clamp(0.0, upper)
+        : fallback;
+    gold = number(data['gold'], 0, 1e12).toInt();
+    exp = number(data['exp'], 0, 1e12);
+    expToNextLevel = max(100, number(data['expNext'], 100, 1e12));
+    characterLevel = max(1, number(data['characterLevel'], 1, 1000).toInt());
+    totalDestroyedBlocks = number(data['kills'], 0, 1e12).toInt();
+    final ranks = data['upgrades'] as Map<String, dynamic>? ?? {};
+    int rank(UpgradeType type) => number(
+      ranks[type.name],
+      0,
+      UpgradeSpec.of(type).maxRank.toDouble(),
+    ).toInt();
+    damageUpgradeLevel = rank(UpgradeType.damage);
+    speedUpgradeLevel = rank(UpgradeType.speed);
+    rangeUpgradeLevel = rank(UpgradeType.range);
+    bounceUpgradeLevel = rank(UpgradeType.bounce);
+    magnetUpgradeLevel = rank(UpgradeType.magnet);
+    spinUpgradeLevel = rank(UpgradeType.spin);
+    resonanceUpgradeLevel = rank(UpgradeType.resonance);
+    fusionCooldownUpgradeLevel = rank(UpgradeType.fusionCooldown);
+    spirits.clear();
+    spiritUpgradeLevel = 0;
+    for (int n = 0; n < rank(UpgradeType.spirit); n++) {
+      summonSpirit();
+    }
+    ownedElements
+      ..clear()
+      ..addAll(
+        ElementData.baseElements
+            .where(
+              (e) => (data['elements'] as List? ?? []).contains(e.type.name),
+            )
+            .map((e) => e.type),
+      );
+    equippedElements
+      ..clear()
+      ..addAll(
+        ownedElements
+            .where((e) => (data['equipped'] as List? ?? []).contains(e.name))
+            .take(maxEquippedElements),
+      );
+    activeFusions
+      ..clear()
+      ..addAll(
+        ElementData.fusionElements
+            .where(
+              (e) =>
+                  (data['fusions'] as List? ?? []).contains(e.type.name) &&
+                  e.ingredients!.every(ownedElements.contains),
+            )
+            .map((e) => e.type),
+      );
+    selectedFusion = activeFusions
+        .where((e) => e.name == data['selected'])
+        .firstOrNull;
+    final angle = atan2(player.transform.vy, player.transform.vx);
+    player.transform.vx = cos(angle) * normalBallSpeed;
+    player.transform.vy = sin(angle) * normalBallSpeed;
+    impacts.clear();
+    floatingTexts.clear();
+  }
+
+  Map<String, dynamic> exportSnapshot() => {
+    'version': 1,
+    'endless': isEndless,
+    'levelId': level.id,
+    'wave': endlessWave,
+    'role': role.type.name,
+    'race': race.type.name,
+    'build': exportBuild(),
+    'cells': blocks.map((b) {
+      final a = b.elementAffinity!;
+      return [
+        b.health!.maxHp,
+        b.health!.currentHp,
+        b.isCorroded ? 1 : 0,
+        a.burnTimer,
+        a.burnDps,
+        a.poisonTimer,
+        a.poisonDps,
+        a.frozenTimer,
+        a.soakedTimer,
+        a.shockTimer,
+        a.voidTimer,
+      ];
+    }).toList(),
+    'ball': [
+      (player.transform.x - gridStartX) / (level.cols * gridBlockSize),
+      (player.transform.y - gridStartY) / (level.rows * gridBlockSize),
+      player.transform.vx,
+      player.transform.vy,
+      player.weaponAngle,
+    ],
+    'drops': drops
+        .map(
+          (d) => [
+            d.type.index,
+            d.value,
+            (d.transform.x - gridStartX) / (level.cols * gridBlockSize),
+            (d.transform.y - gridStartY) / (level.rows * gridBlockSize),
+            d.lifeTime,
+          ],
+        )
+        .toList(),
+    'completed': isLevelCompleted,
+    'waveWait': _waveWait,
+    'cooldown': fusionCooldown,
+    'firestorm': _firestormTimer,
+    'spiritOrbits': spirits
+        .map((spirit) => [spirit.angle, spirit.hitCooldown])
+        .toList(),
+    'attackCooldown': player.attackCooldown,
+    'dashCooldown': dashCooldown,
+    if (pendingFusion != null)
+      'pending': {
+        'type': pendingFusion!.type.name,
+        'target': pendingFusion!.targetId,
+        'age': pendingFusion!.age,
+      },
+  };
+
+  void restoreSnapshot(Map<String, dynamic> data) {
+    if (data['version'] != 1 || data['endless'] != isEndless) {
+      throw const FormatException('Invalid run');
+    }
+    if (isEndless) {
+      endlessWave = (data['wave'] as int).clamp(1, 1000000);
+      level = MemeLevel.endlessWave(endlessWave);
+    } else if (data['levelId'] != level.id) {
+      throw const FormatException('Wrong stage');
+    }
+    restoreBuild(Map<String, dynamic>.from(data['build'] as Map));
+    isGridBuilt = true;
+    _buildPixelGrid();
+    final cells = data['cells'] as List;
+    if (cells.length != blocks.length) {
+      throw const FormatException('Wrong grid');
+    }
+    double numAt(List values, int index) {
+      final value = values[index];
+      if (value is! num || !value.isFinite) {
+        throw const FormatException('Invalid number');
+      }
+      return max(0, value.toDouble());
+    }
+
+    for (int index = 0; index < cells.length; index++) {
+      final values = cells[index] as List;
+      final block = blocks[index];
+      final a = block.elementAffinity!;
+      block.health!.maxHp = max(1, numAt(values, 0));
+      block.health!.currentHp = block.isCenterEmpty
+          ? 0
+          : min(block.health!.maxHp, numAt(values, 1));
+      block.health!.isDestroyed = block.health!.currentHp <= 0;
+      block.isRevealed = block.health!.isDestroyed;
+      block.isCorroded = values[2] == 1;
+      a.burnTimer = numAt(values, 3);
+      a.burnDps = numAt(values, 4);
+      a.poisonTimer = numAt(values, 5);
+      a.poisonDps = numAt(values, 6);
+      a.frozenTimer = numAt(values, 7);
+      a.isFrozen = a.frozenTimer > 0;
+      a.soakedTimer = numAt(values, 8);
+      a.isSoaked = a.soakedTimer > 0;
+      a.shockTimer = numAt(values, 9);
+      a.voidTimer = numAt(values, 10);
+    }
+    final ball = data['ball'] as List;
+    player.transform.position = Offset(
+      gridStartX +
+          (ball[0] as num).toDouble().clamp(0, 1) * level.cols * gridBlockSize,
+      gridStartY +
+          (ball[1] as num).toDouble().clamp(0, 1) * level.rows * gridBlockSize,
+    );
+    player.transform.vx = (ball[2] as num).toDouble().clamp(-360, 360);
+    player.transform.vy = (ball[3] as num).toDouble().clamp(-360, 360);
+    player.weaponAngle = (ball[4] as num).toDouble();
+    player.trail.clear();
+    drops.clear();
+    for (final raw in (data['drops'] as List? ?? []).take(maxDrops)) {
+      final d = raw as List;
+      drops.add(
+        DropItem(
+          id: 'saved_${drops.length}',
+          type: DropType.values[(d[0] as int).clamp(0, 1)],
+          value: numAt(d, 1),
+          transform: TransformComponent(
+            x:
+                gridStartX +
+                numAt(d, 2).clamp(0, 1) * level.cols * gridBlockSize,
+            y:
+                gridStartY +
+                numAt(d, 3).clamp(0, 1) * level.rows * gridBlockSize,
+          ),
+        )..lifeTime = numAt(d, 4),
+      );
+    }
+    fusionCooldown = (data['cooldown'] as num? ?? 0).toDouble().clamp(
+      0,
+      fusionCooldownDuration,
+    );
+    _firestormTimer = (data['firestorm'] as num? ?? 0).toDouble().clamp(0, 4);
+    brokenBlocksCount = actualBrokenBlocksCount;
+    completionPercent = (brokenBlocksCount / totalBlocksCount).clamp(0, 1);
+    isLevelCompleted = completionPercent >= 1;
+    _waveWait = (data['waveWait'] as num? ?? 1.4).toDouble().clamp(0, 1.4);
+    final orbits = data['spiritOrbits'] as List? ?? [];
+    for (int i = 0; i < min(orbits.length, spirits.length); i++) {
+      spirits[i].angle = ((orbits[i] as List)[0] as num).toDouble();
+      spirits[i].hitCooldown = ((orbits[i] as List)[1] as num).toDouble().clamp(
+        0,
+        OrbitingSpirit.contactCooldown,
+      );
+    }
+    player.attackCooldown = (data['attackCooldown'] as num? ?? 0)
+        .toDouble()
+        .clamp(0, 10);
+    dashCooldown = (data['dashCooldown'] as num? ?? 0).toDouble().clamp(0, 1.2);
+    final pending = data['pending'] as Map?;
+    if (pending != null && !isLevelCompleted) {
+      final type = activeFusions
+          .where((e) => e.name == pending['type'])
+          .firstOrNull;
+      final target = blocks.where((b) => b.id == pending['target']).firstOrNull;
+      if (type != null && target != null) {
+        pendingFusion = FusionCast(
+          type: type,
+          center: target.transform.position,
+          color: ElementData.fusionElements
+              .firstWhere((e) => e.type == type)
+              .color,
+          targetId: target.id,
+          board: Rect.fromLTWH(
+            gridStartX,
+            gridStartY,
+            level.cols * gridBlockSize,
+            level.rows * gridBlockSize,
+          ),
+        )..age = (pending['age'] as num).toDouble().clamp(0, FusionCast.windup);
+        fusionCasts.add(pendingFusion!);
+      }
+    }
+    _handleBallBorderCollision();
+  }
 }

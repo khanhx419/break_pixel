@@ -101,6 +101,7 @@ class _ForgeModalState extends State<ForgeModal> {
     final maxed = !engine.canImprove(spec.type);
     final cost = engine.upgradeCost(spec.type);
     final affordable = engine.gold >= cost;
+    final locked = !engine.upgradeAvailable(spec.type);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -146,7 +147,7 @@ class _ForgeModalState extends State<ForgeModal> {
               ),
               const SizedBox(width: 8),
               FilledButton(
-                onPressed: maxed || !affordable
+                onPressed: locked || maxed || !affordable
                     ? null
                     : () {
                         if (engine.purchaseUpgrade(spec.type)) setState(() {});
@@ -161,7 +162,11 @@ class _ForgeModalState extends State<ForgeModal> {
                   ),
                 ),
                 child: Text(
-                  maxed ? 'TỐI ĐA' : '$cost G',
+                  locked
+                      ? 'KHÓA'
+                      : maxed
+                      ? 'TỐI ĐA'
+                      : '$cost G',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,

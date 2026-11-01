@@ -117,12 +117,15 @@ void main() {
       ElementType.lightning,
     ]);
     engine.activeFusions.addAll(ElementType.values.skip(9));
+    engine.selectFusion(ElementType.voidVortex);
     for (int i = 0; i < 5; i++) {
       engine.summonSpirit();
     }
     expect(engine.spirits.length, 4);
     for (int frame = 0; frame < 1800; frame++) {
       engine.update(1 / 60);
+      if (engine.canCastFusion) engine.castFusion();
+      expect(engine.fusionCasts.length, lessThanOrEqualTo(3));
       expect(engine.debris.length, lessThanOrEqualTo(GameEngine.maxDebris));
       expect(
         engine.lightningArcs.length,

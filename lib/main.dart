@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
-import 'screens/prologue_screen.dart';
 
-void main() {
+import 'screens/prologue_screen.dart';
+import 'screens/character_select_screen.dart';
+import 'core/progress_store.dart';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await ProgressStore.instance.initialize();
   runApp(const BreakPixelApp());
 }
 
@@ -25,7 +29,9 @@ class BreakPixelApp extends StatelessWidget {
         fontFamily: 'Roboto',
         useMaterial3: true,
       ),
-      home: const PrologueScreen(),
+      home: ProgressStore.instance.hasProgress
+          ? const CharacterSelectScreen()
+          : const PrologueScreen(),
     );
   }
 }

@@ -57,26 +57,18 @@ class _LevelUpModalState extends State<LevelUpModal> {
 
   List<LevelUpOption> _getChoices() {
     final rng = Random();
-    final unowned =
-        ElementData.baseElements
-            .where((e) => !engine.ownedElements.contains(e.type))
+    final upgrades =
+        UpgradeSpec.all
+            .where(
+              (spec) =>
+                  engine.canImprove(spec.type) &&
+                  engine.upgradeAvailable(spec.type),
+            )
             .toList()
           ..shuffle(rng);
-    final upgrades =
-        UpgradeSpec.all.where((spec) => engine.canImprove(spec.type)).toList()
-          ..shuffle(rng);
     final options = <LevelUpOption>[
-      if (unowned.isNotEmpty)
-        LevelUpOption(
-          kind: ChoiceKind.element,
-          element: unowned.first,
-          title: unowned.first.name,
-          description: unowned.first.description,
-          icon: unowned.first.icon,
-          color: unowned.first.color,
-        ),
       ...upgrades
-          .take(unowned.isEmpty ? 3 : 2)
+          .take(3)
           .map(
             (spec) => LevelUpOption(
               kind: ChoiceKind.upgrade,
