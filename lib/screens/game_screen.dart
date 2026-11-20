@@ -351,15 +351,54 @@ class _GameScreenState extends State<GameScreen>
               builder: (context, value, child) {
                 final data = _engine.fusionData;
                 if (data == null) return const SizedBox.shrink();
-                return Container(
+                final ready = _engine.canCastFusion;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
-                    vertical: 7,
+                    vertical: 8,
                   ),
-                  color: const Color(0xFF15212F),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        ready
+                            ? Color.lerp(
+                                const Color(0xFF15212F),
+                                data.color,
+                                0.16,
+                              )!
+                            : const Color(0xFF131E2C),
+                        const Color(0xFF15212F),
+                      ],
+                    ),
+                    border: Border(
+                      top: BorderSide(
+                        color: ready
+                            ? data.color.withValues(alpha: 0.55)
+                            : Colors.white10,
+                      ),
+                    ),
+                  ),
                   child: Row(
                     children: [
-                      Icon(data.icon, color: data.color, size: 22),
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: data.color.withValues(
+                            alpha: ready ? 0.22 : 0.1,
+                          ),
+                          boxShadow: ready
+                              ? [
+                                  BoxShadow(
+                                    color: data.color.withValues(alpha: 0.45),
+                                    blurRadius: 10,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Icon(data.icon, color: data.color, size: 20),
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -370,21 +409,24 @@ class _GameScreenState extends State<GameScreen>
                               style: TextStyle(
                                 color: data.color,
                                 fontSize: 12,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                             const SizedBox(height: 4),
-                            LinearProgressIndicator(
-                              value: _engine.fusionMeterProgress,
-                              minHeight: 3,
-                              color: data.color,
-                              backgroundColor: Colors.white10,
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(3),
+                              child: LinearProgressIndicator(
+                                value: _engine.fusionMeterProgress,
+                                minHeight: 4,
+                                color: data.color,
+                                backgroundColor: Colors.white10,
+                              ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               _engine.fusionStatus,
-                              style: const TextStyle(
-                                color: Colors.white60,
+                              style: TextStyle(
+                                color: ready ? Colors.white : Colors.white60,
                                 fontSize: 10,
                               ),
                             ),
@@ -393,7 +435,13 @@ class _GameScreenState extends State<GameScreen>
                       ),
                       const SizedBox(width: 8),
                       FilledButton(
-                        onPressed: !_engine.canCastFusion
+                        style: FilledButton.styleFrom(
+                          backgroundColor: data.color,
+                          foregroundColor: const Color(0xFF0D1520),
+                          disabledBackgroundColor: Colors.white10,
+                          disabledForegroundColor: Colors.white38,
+                        ),
+                        onPressed: !ready
                             ? null
                             : () {
                                 if (!_engine.castFusion()) {
@@ -409,7 +457,10 @@ class _GameScreenState extends State<GameScreen>
                               },
                         child: const Text(
                           'GIẢI PHÓNG',
-                          style: TextStyle(fontSize: 10),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ],
@@ -430,9 +481,22 @@ class _GameScreenState extends State<GameScreen>
   );
 
   Widget _buildTopHUDContent() {
+    final theme = _engine.level.theme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      color: Color.lerp(_engine.level.theme.sky, const Color(0xFF172333), 0.65),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color.lerp(theme.sky, const Color(0xFF0E1726), 0.55)!,
+            Color.lerp(theme.sky, const Color(0xFF172333), 0.72)!,
+          ],
+        ),
+        border: Border(
+          bottom: BorderSide(color: theme.accent.withValues(alpha: 0.22)),
+        ),
+      ),
       child: Column(
         children: [
           Row(
@@ -585,6 +649,38 @@ class _GameScreenState extends State<GameScreen>
                   ),
                 ),
               ),
+              if (_engine.comboCount >= 3 || _engine.isOverdriveActive) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _engine.isOverdriveActive
+                        ? Colors.amber.withValues(alpha: 0.28)
+                        : Colors.orange.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: _engine.isOverdriveActive
+                          ? Colors.amberAccent
+                          : Colors.orangeAccent.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Text(
+                    _engine.isOverdriveActive
+                        ? '⚡ QUÁ TẢI ${_engine.overdriveTimer.toStringAsFixed(1)}s'
+                        : '🔥 COMBO x${_engine.comboCount}',
+                    style: TextStyle(
+                      color: _engine.isOverdriveActive
+                          ? Colors.amberAccent
+                          : Colors.orangeAccent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
           if (_engine.ownedElements.isNotEmpty) ...[
@@ -713,7 +809,14 @@ class _GameScreenState extends State<GameScreen>
     );
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      color: const Color(0xFF172333),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131E2C),
+        border: Border(
+          top: BorderSide(
+            color: _engine.level.theme.accent.withValues(alpha: 0.18),
+          ),
+        ),
+      ),
       child: Row(
         children: [
           button(

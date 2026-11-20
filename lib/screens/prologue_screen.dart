@@ -98,7 +98,7 @@ class _PrologueScreenState extends State<PrologueScreen>
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.cyanAccent.withOpacity(0.5),
+                              color: Colors.cyanAccent.withValues(alpha: 0.5),
                               blurRadius: 35,
                               spreadRadius: 8,
                             ),
@@ -143,15 +143,15 @@ class _PrologueScreenState extends State<PrologueScreen>
                       constraints: const BoxConstraints(minHeight: 120),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF161F36).withOpacity(0.9),
+                        color: const Color(0xFF161F36).withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: Colors.cyanAccent.withOpacity(0.35),
+                          color: Colors.cyanAccent.withValues(alpha: 0.35),
                           width: 1.5,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.5),
+                            color: Colors.black.withValues(alpha: 0.5),
                             blurRadius: 15,
                             offset: const Offset(0, 5),
                           ),
@@ -224,13 +224,37 @@ class _CosmicBackgroundPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rng = Random(42);
-    final paint = Paint()..color = Colors.white.withOpacity(0.2);
+    final paint = Paint();
 
-    for (int i = 0; i < 40; i++) {
+    // Soft glowing nebula washes
+    for (final nebula in [
+      (Offset(size.width * 0.2, size.height * 0.25), size.width * 0.45, const Color(0x2000B4D8)),
+      (Offset(size.width * 0.82, size.height * 0.72), size.width * 0.5, const Color(0x1E7B2CBF)),
+    ]) {
+      paint.shader = RadialGradient(
+        colors: [nebula.$3, nebula.$3.withValues(alpha: 0)],
+      ).createShader(Rect.fromCircle(center: nebula.$1, radius: nebula.$2));
+      canvas.drawCircle(nebula.$1, nebula.$2, paint);
+    }
+    paint.shader = null;
+
+    // Twinkling multi-depth starfield & drifting pixel shards
+    for (int i = 0; i < 55; i++) {
       final x = rng.nextDouble() * size.width;
-      final y = (rng.nextDouble() * size.height + animValue * 20) % size.height;
-      final r = rng.nextDouble() * 2.0 + 1.0;
-      canvas.drawCircle(Offset(x, y), r, paint);
+      final speed = 16 + (i % 4) * 10.0;
+      final y = (rng.nextDouble() * size.height + animValue * speed) % size.height;
+      final r = rng.nextDouble() * 1.8 + 0.8;
+      final twinkle = 0.2 + 0.5 * ((sin(animValue * 2 * pi + i) + 1) * 0.5);
+      if (i % 7 == 0) {
+        paint.color = Colors.cyanAccent.withValues(alpha: twinkle * 0.35);
+        canvas.drawRect(
+          Rect.fromCenter(center: Offset(x, y), width: r * 2.6, height: r * 2.6),
+          paint,
+        );
+      } else {
+        paint.color = Colors.white.withValues(alpha: twinkle);
+        canvas.drawCircle(Offset(x, y), r, paint);
+      }
     }
   }
 

@@ -6,30 +6,56 @@ import 'ecs.dart';
 import 'character.dart';
 import 'stage_theme.dart';
 
+enum BlockSpecialType {
+  none,
+  explosiveCrystal, // Tinh thể nổ 3x3
+  energyCore, // Lõi năng lượng hồi cooldown Dung Hợp & Lướt
+  magnetBeacon, // Từ trường hút toàn bản đồ
+  overdriveRune, // Cổ ngữ kích hoạt Cuồng Nộ
+}
+
 /// Khối Pixel To (Chunky Pixel Block)
 class PixelBlock extends GameEntity {
   // Normalized geometry is shared by every tile, rather than allocated per frame.
   static final Path _topFacet = Path()
-    ..moveTo(0.11, 0)
-    ..lineTo(0.89, 0)
-    ..lineTo(0.85, 0.15)
-    ..lineTo(0.15, 0.15)
+    ..moveTo(0.08, 0)
+    ..lineTo(0.92, 0)
+    ..lineTo(0.84, 0.16)
+    ..lineTo(0.16, 0.16)
+    ..close();
+  static final Path _leftFacet = Path()
+    ..moveTo(0, 0.08)
+    ..lineTo(0.14, 0.16)
+    ..lineTo(0.14, 0.84)
+    ..lineTo(0, 0.92)
     ..close();
   static final Path _sideFacet = Path()
-    ..moveTo(1, 0.11)
-    ..lineTo(1, 0.89)
-    ..lineTo(0.85, 0.85)
-    ..lineTo(0.85, 0.15)
+    ..moveTo(1, 0.08)
+    ..lineTo(1, 0.92)
+    ..lineTo(0.84, 0.84)
+    ..lineTo(0.84, 0.16)
+    ..close();
+  static final Path _bottomFacet = Path()
+    ..moveTo(0.08, 1)
+    ..lineTo(0.92, 1)
+    ..lineTo(0.84, 0.85)
+    ..lineTo(0.16, 0.85)
     ..close();
   static final Path _crystalFacet = Path()
-    ..moveTo(0.26, 0.22)
-    ..lineTo(0.58, 0.26)
-    ..lineTo(0.34, 0.76)
+    ..moveTo(0.22, 0.2)
+    ..lineTo(0.62, 0.24)
+    ..lineTo(0.32, 0.78)
+    ..close();
+  static final Path _crystalSheen = Path()
+    ..moveTo(0.62, 0.24)
+    ..lineTo(0.78, 0.56)
+    ..lineTo(0.48, 0.76)
     ..close();
   final int col;
   final int row;
   final Color memeColor;
   final bool isCenterEmpty;
+  final BlockSpecialType specialType;
   bool isRevealed = false;
   bool isCorroded = false;
   double hitFlashTimer = 0.0;
@@ -44,6 +70,7 @@ class PixelBlock extends GameEntity {
     required this.row,
     required this.memeColor,
     this.isCenterEmpty = false,
+    this.specialType = BlockSpecialType.none,
   });
 
   bool takeDamage(double damage) {
@@ -79,8 +106,8 @@ class PixelBlock extends GameEntity {
     if (health?.isDestroyed ?? false) return;
     final cell = transform.rect;
     final unit = cell.width;
-    final rect = cell.deflate(min(0.6, unit * 0.045));
-    final shape = RRect.fromRectAndRadius(rect, Radius.circular(unit * 0.09));
+    final rect = cell.deflate(min(0.65, unit * 0.042));
+    final shape = RRect.fromRectAndRadius(rect, Radius.circular(unit * 0.11));
     final skin = theme ?? StageTheme.all.first;
     final affinity = elementAffinity;
     final frozen = affinity?.isFrozen ?? false;
@@ -88,19 +115,22 @@ class PixelBlock extends GameEntity {
     final burning = (affinity?.burnTimer ?? 0) > 0;
     final poisoned = (affinity?.poisonTimer ?? 0) > 0;
     final shocked = (affinity?.shockTimer ?? 0) > 0;
-    final phase = time * 2.4 + row * 0.7 + col * 1.3;
+    final voided = (affinity?.voidTimer ?? 0) > 0;
+    final phase = time * 2.6 + row * 0.7 + col * 1.3;
     final hash = (row * 37 + col * 17) % 11;
-    var face = Color.lerp(skin.tile, skin.edge, 0.1 + hash * 0.012)!;
-    if (wet) face = Color.lerp(face, const Color(0xFF267A9B), 0.35)!;
-    if (poisoned) face = Color.lerp(face, const Color(0xFF668A41), 0.35)!;
-    if (burning) face = Color.lerp(face, const Color(0xFF9B432B), 0.48)!;
-    if (frozen) face = Color.lerp(face, const Color(0xFF8BC7DC), 0.55)!;
-    if (shocked) face = Color.lerp(face, const Color(0xFFBDA669), 0.24)!;
+
+    var face = Color.lerp(skin.tile, skin.edge, 0.08 + hash * 0.013)!;
+    if (wet) face = Color.lerp(face, const Color(0xFF1D7FA8), 0.38)!;
+    if (poisoned) face = Color.lerp(face, const Color(0xFF568B33), 0.42)!;
+    if (burning) face = Color.lerp(face, const Color(0xFFB53E20), 0.52)!;
+    if (frozen) face = Color.lerp(face, const Color(0xFF7FD1EC), 0.62)!;
+    if (shocked) face = Color.lerp(face, const Color(0xFFD2B256), 0.28)!;
+    if (voided) face = Color.lerp(face, const Color(0xFF523285), 0.36)!;
     if (hitFlashTimer > 0) {
       face = Color.lerp(
         face,
-        Colors.white,
-        (hitFlashTimer / 0.1).clamp(0, 1) * 0.45,
+        const Color(0xFFFFF8E7),
+        (hitFlashTimer / 0.1).clamp(0, 1) * 0.68,
       )!;
     }
 
@@ -108,305 +138,539 @@ class PixelBlock extends GameEntity {
       ..shader = null
       ..maskFilter = null
       ..style = PaintingStyle.fill;
-    // The low edge and broad top facet give the tile actual volume at small sizes.
-    paint.color = skin.edge;
-    canvas.drawRRect(shape.shift(Offset(0, unit * 0.055)), paint);
+
+    // Sculpted 3D base ledge for tactile block depth
+    paint.color = Color.lerp(skin.edge, Colors.black, 0.28)!;
+    canvas.drawRRect(shape.shift(Offset(0, unit * 0.065)), paint);
+
+    // Main tile face
     paint.color = face;
     canvas.drawRRect(shape, paint);
-    final cut = unit * 0.11;
+
+    // 4-sided 3D chisel bevel facets
     canvas.save();
     canvas.translate(rect.left, rect.top);
     canvas.scale(rect.width, rect.height);
-    paint.color = Color.lerp(face, skin.accent, frozen ? 0.5 : 0.27)!;
+    paint.color = Color.lerp(
+      face,
+      frozen ? Colors.white : skin.accent,
+      frozen ? 0.56 : 0.32,
+    )!;
     canvas.drawPath(_topFacet, paint);
-    paint.color = Color.lerp(face, skin.edge, 0.6)!;
+    paint.color = Color.lerp(face, skin.accent, 0.14)!;
+    canvas.drawPath(_leftFacet, paint);
+    paint.color = Color.lerp(face, skin.edge, 0.55)!;
     canvas.drawPath(_sideFacet, paint);
+    paint.color = Color.lerp(face, skin.edge, 0.72)!;
+    canvas.drawPath(_bottomFacet, paint);
     canvas.restore();
+
+    // Crisp outer rim + top specular glint
     paint
       ..style = PaintingStyle.stroke
-      ..strokeWidth = max(0.45, unit * 0.025)
-      ..color = Colors.black.withValues(alpha: 0.25);
+      ..strokeWidth = max(0.5, unit * 0.028)
+      ..color = Colors.black.withValues(alpha: 0.34);
     canvas.drawRRect(shape, paint);
-    paint.color = skin.accent.withValues(alpha: 0.2);
+
+    final cut = unit * 0.13;
+    paint
+      ..strokeWidth = max(0.55, unit * 0.035)
+      ..color = Color.lerp(skin.accent, Colors.white, 0.45)!
+          .withValues(alpha: frozen ? 0.65 : 0.34);
     canvas.drawLine(
-      rect.topLeft + Offset(cut + 1, unit * 0.08),
-      rect.topRight + Offset(-cut - 1, unit * 0.08),
+      rect.topLeft + Offset(cut, unit * 0.075),
+      rect.topRight + Offset(-cut, unit * 0.075),
       paint,
     );
 
-    // Sparse deterministic material details; these never sample the secret picture.
-    if (unit >= 9 && !frozen) {
-      paint
-        ..style = PaintingStyle.fill
-        ..color = skin.accent.withValues(alpha: 0.07);
+    // Deterministic material micro-textures (never samples memeColor)
+    if (unit >= 8.5 && !frozen) {
+      paint.style = PaintingStyle.fill;
       switch (skin.material) {
         case BlockMaterial.stone:
-          canvas.drawRect(
-            Rect.fromLTWH(
-              rect.left + unit * 0.23,
-              rect.top + unit * (0.35 + hash * 0.015),
-              unit * 0.16,
-              unit * 0.05,
+          paint.color = skin.accent.withValues(alpha: 0.1);
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(
+                rect.left + unit * 0.22,
+                rect.top + unit * (0.34 + hash * 0.015),
+                unit * 0.2,
+                unit * 0.055,
+              ),
+              Radius.circular(unit * 0.02),
             ),
             paint,
           );
           if (hash % 3 == 0) {
+            paint.color = skin.edge.withValues(alpha: 0.4);
             canvas.drawRect(
               Rect.fromLTWH(
-                rect.left + unit * 0.65,
-                rect.top + unit * 0.65,
-                unit * 0.08,
-                unit * 0.06,
+                rect.left + unit * 0.6,
+                rect.top + unit * 0.62,
+                unit * 0.12,
+                unit * 0.07,
               ),
               paint,
             );
           }
         case BlockMaterial.moss:
-          paint.color = skin.accent.withValues(alpha: 0.1);
-          canvas.drawRect(
-            Rect.fromLTWH(
-              rect.left + unit * 0.14,
-              rect.top + unit * 0.24,
-              unit * 0.18,
-              unit * 0.1,
+          paint.color = skin.accent.withValues(alpha: 0.18);
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(
+                rect.left + unit * 0.14,
+                rect.top + unit * 0.22,
+                unit * 0.22,
+                unit * 0.1,
+              ),
+              Radius.circular(unit * 0.04),
             ),
             paint,
           );
-          canvas.drawRect(
-            Rect.fromLTWH(
-              rect.left + unit * 0.2,
-              rect.top + unit * 0.31,
-              unit * 0.08,
-              unit * 0.14,
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(
+                rect.left + unit * 0.18,
+                rect.top + unit * 0.3,
+                unit * 0.09,
+                unit * 0.18,
+              ),
+              Radius.circular(unit * 0.04),
             ),
             paint,
           );
+          if (hash % 2 == 0) {
+            paint.color = Colors.white.withValues(alpha: 0.16);
+            canvas.drawCircle(
+              rect.topLeft + Offset(unit * 0.22, unit * 0.26),
+              unit * 0.028,
+              paint,
+            );
+          }
         case BlockMaterial.alloy:
+          // Brushed panel seam & metallic rivets
           paint
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 0.6
-            ..color = skin.edge.withValues(alpha: 0.45);
+            ..strokeWidth = max(0.55, unit * 0.03)
+            ..color = skin.edge.withValues(alpha: 0.55);
           canvas.drawLine(
-            rect.topLeft + Offset(unit * 0.24, unit * 0.72),
-            rect.topRight + Offset(-unit * 0.24, unit * 0.72),
+            rect.topLeft + Offset(unit * 0.2, unit * 0.72),
+            rect.topRight + Offset(-unit * 0.2, unit * 0.72),
             paint,
           );
-          if (hash % 4 == 0) {
+          paint.color = Colors.white.withValues(alpha: 0.09);
+          canvas.drawLine(
+            rect.topLeft + Offset(unit * 0.22, unit * 0.32),
+            rect.topLeft + Offset(unit * 0.44, unit * 0.54),
+            paint,
+          );
+          if (hash % 3 == 0) {
             paint
               ..style = PaintingStyle.fill
-              ..color = skin.accent.withValues(alpha: 0.25);
+              ..color = skin.accent.withValues(alpha: 0.35);
             canvas.drawCircle(
-              rect.topLeft + Offset(unit * 0.24, unit * 0.3),
-              unit * 0.035,
+              rect.topLeft + Offset(unit * 0.23, unit * 0.28),
+              unit * 0.038,
+              paint,
+            );
+            canvas.drawCircle(
+              rect.topRight + Offset(-unit * 0.23, unit * 0.28),
+              unit * 0.038,
               paint,
             );
           }
         case BlockMaterial.crystal:
-          paint.color = skin.accent.withValues(alpha: 0.1);
           canvas.save();
           canvas.translate(rect.left, rect.top);
           canvas.scale(rect.width, rect.height);
+          paint.color = Colors.white.withValues(alpha: 0.15);
           canvas.drawPath(_crystalFacet, paint);
+          paint.color = skin.accent.withValues(alpha: 0.12);
+          canvas.drawPath(_crystalSheen, paint);
           canvas.restore();
         case BlockMaterial.astral:
           if (hash % 3 == 0) {
+            final c = rect.center;
             paint
               ..style = PaintingStyle.stroke
-              ..strokeWidth = 0.6
-              ..color = skin.accent.withValues(alpha: 0.18);
-            final c = rect.center;
+              ..strokeWidth = max(0.55, unit * 0.032)
+              ..color = skin.accent.withValues(alpha: 0.3);
             canvas.drawLine(
-              c - Offset(unit * 0.1, 0),
-              c + Offset(unit * 0.1, 0),
+              c - Offset(unit * 0.13, 0),
+              c + Offset(unit * 0.13, 0),
               paint,
             );
             canvas.drawLine(
-              c - Offset(0, unit * 0.1),
-              c + Offset(0, unit * 0.1),
+              c - Offset(0, unit * 0.13),
+              c + Offset(0, unit * 0.13),
               paint,
             );
+            paint
+              ..style = PaintingStyle.fill
+              ..color = Colors.white.withValues(alpha: 0.35);
+            canvas.drawCircle(c, unit * 0.032, paint);
           }
       }
     }
 
+    // Corroded (Acid Melt) visual etch
+    if (isCorroded) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.7, unit * 0.05)
+        ..color = const Color(0x9934D399);
+      canvas.drawRRect(shape.deflate(unit * 0.06), paint);
+    }
+
+    // Special block emblem (deterministic, never leaks memeColor)
+    if (specialType != BlockSpecialType.none && unit >= 8.5) {
+      _drawSpecialEmblem(canvas, paint, rect, unit, phase);
+    }
+
+    // === ELEMENTAL STATUS OVERLAYS ===
     if (wet) {
-      final surface = rect.bottom - unit * (0.2 + sin(phase) * 0.04);
+      final waveLift = sin(phase * 1.4) * 0.045;
+      final surface = rect.bottom - unit * (0.24 + waveLift);
       paint
         ..style = PaintingStyle.fill
-        ..color = const Color(0x4447C4E6);
-      canvas.drawRect(
-        Rect.fromLTRB(rect.left, surface, rect.right, rect.bottom),
+        ..color = const Color(0x6622D3EE);
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          Rect.fromLTRB(rect.left + unit * 0.03, surface, rect.right - unit * 0.03, rect.bottom - unit * 0.03),
+          bottomLeft: Radius.circular(unit * 0.08),
+          bottomRight: Radius.circular(unit * 0.08),
+        ),
         paint,
       );
+      // Shimmering foam crest
       paint
         ..style = PaintingStyle.stroke
-        ..strokeWidth = max(0.6, unit * 0.045)
-        ..color = const Color(0xAA9DE7F2);
+        ..strokeWidth = max(0.7, unit * 0.05)
+        ..color = const Color(0xDDF0FDFF);
       canvas.drawLine(
-        Offset(rect.left + unit * 0.1, surface),
-        Offset(rect.right - unit * 0.1, surface),
+        Offset(rect.left + unit * 0.12, surface),
+        Offset(rect.right - unit * 0.12, surface),
+        paint,
+      );
+      // Glossy water droplet glint
+      paint
+        ..style = PaintingStyle.fill
+        ..color = const Color(0xCCF0FDFF);
+      canvas.drawCircle(
+        Offset(rect.left + unit * 0.28, rect.top + unit * 0.34),
+        unit * 0.055,
         paint,
       );
     }
+
     if (frozen) {
+      // Crystalline ice glaze & gleaming rim
+      paint
+        ..style = PaintingStyle.fill
+        ..color = const Color(0x36CCF4FF);
+      canvas.drawRRect(shape, paint);
       paint
         ..style = PaintingStyle.stroke
-        ..strokeWidth = max(0.6, unit * 0.055)
-        ..color = const Color(0xBBB9EAF2);
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = max(0.9, unit * 0.068)
+        ..color = const Color(0xE6D8F8FF);
       canvas.drawRRect(shape, paint);
+
+      // Sharp glacial refraction streaks + sparkle cross
       final center = rect.center;
+      paint
+        ..strokeWidth = max(0.7, unit * 0.05)
+        ..color = Colors.white.withValues(alpha: 0.85);
       canvas.drawLine(
-        center + Offset(-unit * 0.28, -unit * 0.27),
-        center + Offset(unit * 0.2, unit * 0.24),
+        center + Offset(-unit * 0.28, -unit * 0.24),
+        center + Offset(unit * 0.22, unit * 0.26),
+        paint,
+      );
+      paint.color = const Color(0xBB9CEAFF);
+      canvas.drawLine(
+        center + Offset(-unit * 0.02, -unit * 0.28),
+        center + Offset(unit * 0.26, 0),
         paint,
       );
       canvas.drawLine(
-        center + Offset(unit * 0.02, -unit * 0.02),
-        center + Offset(unit * 0.23, -unit * 0.2),
+        center + Offset(-unit * 0.24, unit * 0.04),
+        center + Offset(0, unit * 0.28),
         paint,
       );
+      paint.strokeCap = StrokeCap.butt;
     }
+
     if (burning) {
-      // Two small, animated ember tongues; no particle emitter per tile.
-      paint.style = PaintingStyle.stroke;
-      paint.strokeCap = StrokeCap.round;
+      // Glowing molten heat rim
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.7, unit * 0.05)
+        ..color = const Color(0xBBFF7B29);
+      canvas.drawRRect(shape.deflate(unit * 0.02), paint);
+
+      // Layered flickering flames (crimson-orange outer + bright yellow-white inner)
+      paint.style = PaintingStyle.fill;
       for (int i = 0; i < 2; i++) {
-        final x = rect.left + unit * (0.32 + i * 0.34);
-        final lift = unit * (0.12 + (sin(phase * 1.8 + i * 2) + 1) * 0.07);
-        final base = Offset(x, rect.top + unit * 0.26);
-        final flame = Path()
-          ..moveTo(base.dx - unit * 0.08, base.dy)
+        final x = rect.left + unit * (0.31 + i * 0.36);
+        final lift = unit * (0.18 + (sin(phase * 2.4 + i * 2.2) + 1) * 0.09);
+        final sway = sin(phase * 3.1 + i) * unit * 0.05;
+        final base = Offset(x, rect.top + unit * 0.3);
+        final outerFlame = Path()
+          ..moveTo(base.dx - unit * 0.11, base.dy)
           ..quadraticBezierTo(
-            base.dx - unit * 0.13,
-            base.dy - lift * 0.5,
-            base.dx + unit * 0.07,
-            base.dy - lift * 1.3,
-          )
-          ..quadraticBezierTo(
-            base.dx + unit * 0.02,
+            base.dx - unit * 0.14,
             base.dy - lift * 0.55,
-            base.dx + unit * 0.08,
-            base.dy - lift * 0.35,
+            base.dx + sway,
+            base.dy - lift * 1.45,
           )
           ..quadraticBezierTo(
             base.dx + unit * 0.14,
+            base.dy - lift * 0.5,
+            base.dx + unit * 0.11,
             base.dy,
-            base.dx - unit * 0.08,
+          )
+          ..close();
+        paint.color = const Color(0xF0FF6A2B);
+        canvas.drawPath(outerFlame, paint);
+
+        final innerFlame = Path()
+          ..moveTo(base.dx - unit * 0.06, base.dy)
+          ..quadraticBezierTo(
+            base.dx,
+            base.dy - lift * 0.95,
+            base.dx + unit * 0.06,
             base.dy,
-          );
-        paint
-          ..style = PaintingStyle.fill
-          ..color = const Color(0xEFFF9C56);
-        canvas.drawPath(flame, paint);
-        paint.color = const Color(0xFFFFE1A0);
-        canvas.drawOval(
-          Rect.fromCenter(
-            center: base - Offset(0, lift * 0.2),
-            width: unit * 0.07,
-            height: lift * 0.5,
-          ),
-          paint,
-        );
+          )
+          ..close();
+        paint.color = const Color(0xFFFFF3B0);
+        canvas.drawPath(innerFlame, paint);
       }
+    }
+
+    if (poisoned) {
+      // Toxic bubbling slime rim + rising glowing bubbles
+      paint
+        ..style = PaintingStyle.fill
+        ..color = const Color(0x5584CC16);
+      canvas.drawRRect(
+        RRect.fromRectAndCorners(
+          Rect.fromLTRB(
+            rect.left + unit * 0.06,
+            rect.bottom - unit * 0.22,
+            rect.right - unit * 0.06,
+            rect.bottom - unit * 0.04,
+          ),
+          bottomLeft: Radius.circular(unit * 0.07),
+          bottomRight: Radius.circular(unit * 0.07),
+        ),
+        paint,
+      );
+      for (int i = 0; i < 3; i++) {
+        final drift = (time * 0.6 + i * 0.34 + (row % 3) * 0.13) % 1;
+        final bx = rect.left + unit * (0.24 + i * 0.25);
+        final by = rect.bottom - unit * (0.14 + drift * 0.56);
+        final br = unit * (0.055 + (i % 2) * 0.025) * (1 - drift * 0.4);
+        paint.color = const Color(0xFFBEF264).withValues(alpha: (1 - drift) * 0.85);
+        canvas.drawCircle(Offset(bx, by), br, paint);
+        paint.color = Colors.white.withValues(alpha: (1 - drift) * 0.65);
+        canvas.drawCircle(Offset(bx - br * 0.3, by - br * 0.3), br * 0.35, paint);
+      }
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(0.55, unit * 0.04)
+        ..color = const Color(0xBBA855F7);
+      canvas.drawLine(
+        rect.bottomLeft + Offset(unit * 0.14, -unit * 0.09),
+        rect.bottomRight + Offset(-unit * 0.14, -unit * 0.09),
+        paint,
+      );
+    }
+
+    if (shocked && sin(phase * 3.4) > -0.45) {
+      final center = rect.center;
+      final bolt = Path()
+        ..moveTo(center.dx - unit * 0.2, center.dy - unit * 0.3)
+        ..lineTo(center.dx + unit * 0.1, center.dy - unit * 0.03)
+        ..lineTo(center.dx - unit * 0.09, center.dy + unit * 0.05)
+        ..lineTo(center.dx + unit * 0.22, center.dy + unit * 0.3);
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..strokeWidth = max(1.8, unit * 0.14)
+        ..color = const Color(0x66FACC15);
+      canvas.drawPath(bolt, paint);
+      paint
+        ..strokeWidth = max(0.85, unit * 0.06)
+        ..color = const Color(0xFFFFFBE6);
+      canvas.drawPath(bolt, paint);
       paint.strokeCap = StrokeCap.butt;
     }
-    if (poisoned) {
-      paint.style = PaintingStyle.fill;
-      for (int i = 0; i < 2; i++) {
-        final drift = (time * 0.5 + i * 0.47 + (row % 3) * 0.13) % 1;
-        paint.color = const Color(0xFFACCA77)
-            .withValues(alpha: (1 - drift) * 0.7);
-        canvas.drawCircle(
-          Offset(
-            rect.left + unit * (0.3 + i * 0.35),
-            rect.bottom - unit * (0.15 + drift * 0.5),
-          ),
-          unit * 0.07,
-          paint,
-        );
-      }
+
+    if (voided) {
       paint
         ..style = PaintingStyle.stroke
-        ..strokeWidth = max(0.5, unit * 0.04)
-        ..color = const Color(0xAA9D81B9);
-      canvas.drawLine(
-        rect.bottomLeft + Offset(unit * 0.15, -unit * 0.1),
-        rect.bottomRight + Offset(-unit * 0.15, -unit * 0.1),
-        paint,
-      );
-    }
-    if (shocked && sin(phase * 3) > -0.35) {
-      paint
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = max(0.7, unit * 0.07)
-        ..color = const Color(0xFFF6DF9A);
-      final center = rect.center;
-      canvas.drawLine(
-        center + Offset(-unit * 0.16, -unit * 0.28),
-        center + Offset(unit * 0.08, -unit * 0.02),
-        paint,
-      );
-      canvas.drawLine(
-        center + Offset(unit * 0.08, -unit * 0.02),
-        center + Offset(-unit * 0.08, unit * 0.04),
-        paint,
-      );
-      canvas.drawLine(
-        center + Offset(-unit * 0.08, unit * 0.04),
-        center + Offset(unit * 0.18, unit * 0.27),
-        paint,
-      );
-    }
-    if ((affinity?.voidTimer ?? 0) > 0) {
-      paint
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = max(0.6, unit * 0.055)
-        ..color = const Color(0xCCB599DC);
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = max(0.75, unit * 0.055)
+        ..color = const Color(0xDDC084FC);
       canvas.drawArc(
-        Rect.fromCircle(center: rect.center, radius: unit * 0.26),
-        phase * 0.4,
-        pi * 1.5,
+        Rect.fromCircle(center: rect.center, radius: unit * 0.28),
+        phase * 0.6,
+        pi * 1.25,
         false,
         paint,
       );
+      paint.color = const Color(0xAAF472B6);
+      canvas.drawArc(
+        Rect.fromCircle(center: rect.center, radius: unit * 0.16),
+        -phase * 0.9,
+        pi * 1.1,
+        false,
+        paint,
+      );
+      paint.strokeCap = StrokeCap.butt;
     }
+
+    // Crisp dual-tone fracture cracks + color-shifting HP bar
     final hp = health?.hpPercent ?? 1;
-    if (hp < 0.75) {
+    if (hp < 0.78) {
       final c = rect.center;
       final crack = Path()
-        ..moveTo(rect.left + unit * 0.22, rect.top + unit * 0.2)
-        ..lineTo(c.dx - unit * 0.06, c.dy - unit * 0.08)
+        ..moveTo(rect.left + unit * 0.2, rect.top + unit * 0.18)
+        ..lineTo(c.dx - unit * 0.07, c.dy - unit * 0.08)
         ..lineTo(c.dx + unit * 0.09, c.dy + unit * 0.02);
-      if (hp < 0.45) {
+      if (hp < 0.48) {
         crack
-          ..lineTo(c.dx - unit * 0.06, c.dy + unit * 0.19)
-          ..lineTo(c.dx + unit * 0.12, rect.bottom - unit * 0.15);
+          ..lineTo(c.dx - unit * 0.06, c.dy + unit * 0.2)
+          ..lineTo(c.dx + unit * 0.13, rect.bottom - unit * 0.14);
         crack
           ..moveTo(c.dx + unit * 0.09, c.dy + unit * 0.02)
-          ..lineTo(rect.right - unit * 0.14, c.dy - unit * 0.12);
+          ..lineTo(rect.right - unit * 0.14, c.dy - unit * 0.13);
       }
+      if (hp < 0.25) {
+        crack
+          ..moveTo(c.dx - unit * 0.07, c.dy - unit * 0.08)
+          ..lineTo(rect.left + unit * 0.14, c.dy + unit * 0.14);
+      }
+      // Subtle bright edge highlight behind crack
       paint
         ..style = PaintingStyle.stroke
-        ..strokeWidth = max(0.65, unit * 0.055)
-        ..color = skin.edge;
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = max(0.7, unit * 0.055)
+        ..color = skin.accent.withValues(alpha: 0.25);
+      canvas.save();
+      canvas.translate(0.5, 0.5);
       canvas.drawPath(crack, paint);
-      if (unit >= 10 && (hitFlashTimer > 0 || hp < 0.3)) {
+      canvas.restore();
+      // Deep dark fracture
+      paint
+        ..strokeWidth = max(0.75, unit * 0.062)
+        ..color = Color.lerp(skin.edge, Colors.black, 0.55)!;
+      canvas.drawPath(crack, paint);
+      paint.strokeCap = StrokeCap.butt;
+
+      if (unit >= 9.5 && (hitFlashTimer > 0 || hp < 0.35)) {
         final bar = Rect.fromLTWH(
-          rect.left + unit * 0.2,
+          rect.left + unit * 0.16,
           rect.bottom - unit * 0.19,
-          unit * 0.55,
-          max(0.7, unit * 0.045),
+          unit * 0.68,
+          max(1.1, unit * 0.06),
         );
         paint
           ..style = PaintingStyle.fill
-          ..color = Colors.black.withValues(alpha: 0.3);
-        canvas.drawRect(bar, paint);
-        paint.color = skin.accent.withValues(alpha: 0.5);
-        canvas.drawRect(
-          Rect.fromLTWH(bar.left, bar.top, bar.width * hp, bar.height),
+          ..color = Colors.black.withValues(alpha: 0.5);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(bar, Radius.circular(bar.height)),
+          paint,
+        );
+        paint.color = hp < 0.3
+            ? const Color(0xFFFF6B6B)
+            : Color.lerp(const Color(0xFFFFB74D), skin.accent, hp)!;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(bar.left, bar.top, bar.width * hp, bar.height),
+            Radius.circular(bar.height),
+          ),
           paint,
         );
       }
+    }
+    paint.style = PaintingStyle.fill;
+  }
+
+  void _drawSpecialEmblem(
+    Canvas canvas,
+    Paint paint,
+    Rect rect,
+    double unit,
+    double phase,
+  ) {
+    final c = rect.center;
+    final pulse = 0.72 + 0.28 * sin(phase * 1.4);
+    final r = unit * 0.24;
+    switch (specialType) {
+      case BlockSpecialType.explosiveCrystal:
+        paint
+          ..style = PaintingStyle.fill
+          ..color = const Color(0xFFFF6B35).withValues(alpha: 0.32 * pulse);
+        canvas.drawCircle(c, r * 1.35, paint);
+        final diamond = Path()
+          ..moveTo(c.dx, c.dy - r)
+          ..lineTo(c.dx + r, c.dy)
+          ..lineTo(c.dx, c.dy + r)
+          ..lineTo(c.dx - r, c.dy)
+          ..close();
+        paint.color = const Color(0xFFFF9F1C).withValues(alpha: 0.9);
+        canvas.drawPath(diamond, paint);
+        paint.color = const Color(0xFFFFF3B0);
+        canvas.drawCircle(c, r * 0.38, paint);
+      case BlockSpecialType.energyCore:
+        paint
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = max(0.8, unit * 0.06)
+          ..color = const Color(0xFF38BDF8).withValues(alpha: 0.85 * pulse);
+        canvas.drawCircle(c, r, paint);
+        paint
+          ..style = PaintingStyle.fill
+          ..color = const Color(0xFFE0F2FE);
+        canvas.drawCircle(c, r * 0.45, paint);
+      case BlockSpecialType.magnetBeacon:
+        paint
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = max(0.9, unit * 0.065)
+          ..color = const Color(0xFFFACC15).withValues(alpha: 0.9 * pulse);
+        canvas.drawArc(
+          Rect.fromCircle(center: c, radius: r * 0.9),
+          pi * 0.15,
+          pi * 1.7,
+          false,
+          paint,
+        );
+        paint
+          ..style = PaintingStyle.fill
+          ..color = const Color(0xFF5EEAD4);
+        canvas.drawCircle(c, r * 0.36, paint);
+        paint.strokeCap = StrokeCap.butt;
+      case BlockSpecialType.overdriveRune:
+        paint
+          ..style = PaintingStyle.fill
+          ..color = const Color(0xFFE879F9).withValues(alpha: 0.3 * pulse);
+        canvas.drawCircle(c, r * 1.35, paint);
+        final star = Path()
+          ..moveTo(c.dx, c.dy - r * 1.1)
+          ..lineTo(c.dx + r * 0.35, c.dy - r * 0.35)
+          ..lineTo(c.dx + r * 1.1, c.dy)
+          ..lineTo(c.dx + r * 0.35, c.dy + r * 0.35)
+          ..lineTo(c.dx, c.dy + r * 1.1)
+          ..lineTo(c.dx - r * 0.35, c.dy + r * 0.35)
+          ..lineTo(c.dx - r * 1.1, c.dy)
+          ..lineTo(c.dx - r * 0.35, c.dy - r * 0.35)
+          ..close();
+        paint.color = const Color(0xFFFDE047);
+        canvas.drawPath(star, paint);
+      case BlockSpecialType.none:
+        break;
     }
     paint.style = PaintingStyle.fill;
   }
@@ -442,9 +706,9 @@ class PlayerBall extends GameEntity {
     transform.x += transform.vx * dt;
     transform.y += transform.vy * dt;
 
-    // Lưu vệt chuyển động sao chổi
+    // Lưu vệt chuyển động sao chổi mượt hơn
     trail.insert(0, Offset(transform.x, transform.y));
-    if (trail.length > 8) trail.removeLast();
+    if (trail.length > 12) trail.removeLast();
 
     // Xoay vũ khí (nhân thêm hệ số xoay cuồng nộ)
     final speedMultiplier = race.speedMultiplier;
@@ -456,57 +720,186 @@ class PlayerBall extends GameEntity {
   }
 
   @override
-  void draw(Canvas canvas, Paint paint) {
+  void draw(
+    Canvas canvas,
+    Paint paint, {
+    double time = 0,
+    bool isDashing = false,
+    List<Color> elementColors = const [],
+  }) {
     final center = transform.position;
+    paint
+      ..shader = null
+      ..maskFilter = null;
 
-    // 0. Vẽ vệt chuyển động sao chổi phía sau bóng (Comet Motion Trail)
-    for (int i = trail.length - 1; i >= 0; i--) {
-      final tPos = trail[i];
-      final tProgress = 1.0 - (i / trail.length);
-      final tAlpha = tProgress * 0.35;
-      final tRadius = radius * (0.4 + 0.6 * tProgress);
-      final trailPaint = Paint()
-        ..color = role.themeColor.withValues(alpha: tAlpha);
-      canvas.drawCircle(tPos, tRadius, trailPaint);
+    // 0. Smooth glowing comet ribbon trail (amplified during dash)
+    if (trail.length >= 2) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+      for (int i = trail.length - 1; i >= 1; i--) {
+        final tProg = 1.0 - (i / trail.length);
+        final a = trail[i];
+        final b = trail[i - 1];
+        // Outer luminous tail
+        paint
+          ..strokeWidth = radius * (0.35 + 1.1 * tProg) * (isDashing ? 1.25 : 1.0)
+          ..color = role.themeColor.withValues(
+            alpha: tProg * (isDashing ? 0.34 : 0.2),
+          );
+        canvas.drawLine(a, b, paint);
+        // Inner white-tinted plasma streak
+        paint
+          ..strokeWidth = radius * (0.14 + 0.45 * tProg)
+          ..color = Colors.white.withValues(
+            alpha: tProg * (isDashing ? 0.55 : 0.25),
+          );
+        canvas.drawLine(a, b, paint);
+      }
+      paint.strokeCap = StrokeCap.butt;
     }
 
-    // 1. Nếu là Tộc Yeti: Vẽ hào quang băng giá (Frost Aura)
-    if (race.type == RaceType.yeti) {
-      final auraPaint = Paint()
-        ..color = Colors.cyanAccent.withValues(alpha: 0.25)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-      canvas.drawCircle(center, radius + 12, auraPaint);
-    }
+    // 1. Race-specific energy halo around the 3D sphere
+    _drawRaceAura(canvas, paint, center, time, isDashing);
 
-    // 2. Vẽ quả cầu bóng bẩy theo phong cách 3D (RadialGradient tương phản với thế giới pixel)
-    final gradient = RadialGradient(
-      center: const Alignment(-0.35, -0.4),
-      radius: 0.85,
+    // 2. Soft drop shadow underneath sphere to float above revealed artwork
+    paint
+      ..style = PaintingStyle.fill
+      ..color = Colors.black.withValues(alpha: 0.38);
+    canvas.drawCircle(center + Offset(1.5, 2.5), radius * 1.02, paint);
+
+    // 3. Rich glossy 3D metallic-glass sphere
+    final sphereRect = Rect.fromCircle(center: center, radius: radius);
+    paint.shader = RadialGradient(
+      center: const Alignment(-0.38, -0.42),
+      radius: 0.9,
       colors: [
         Colors.white,
+        Color.lerp(Colors.white, role.themeColor, 0.35)!,
         role.themeColor,
-        Color.lerp(role.themeColor, Colors.black, 0.65)!,
+        Color.lerp(role.themeColor, Colors.black, 0.68)!,
       ],
-      stops: const [0.0, 0.45, 1.0],
-    );
-
-    final sphereRect = Rect.fromCircle(center: center, radius: radius);
-    paint.shader = gradient.createShader(sphereRect);
-    paint.style = PaintingStyle.fill;
+      stops: const [0.0, 0.22, 0.55, 1.0],
+    ).createShader(sphereRect);
     canvas.drawCircle(center, radius, paint);
     paint.shader = null;
 
-    // 3. Viền ánh sáng mượt mà
-    paint.color = Colors.white.withValues(alpha: 0.6);
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 1.5;
+    // Glossy top-left specular highlight
+    paint.color = Colors.white.withValues(alpha: 0.78);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: center + Offset(-radius * 0.32, -radius * 0.34),
+        width: radius * 0.42,
+        height: radius * 0.26,
+      ),
+      paint,
+    );
+
+    // Bottom-right rim light bounce
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = max(1.0, radius * 0.13)
+      ..color = Color.lerp(race.themeColor, Colors.white, 0.45)!
+          .withValues(alpha: 0.65);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius * 0.86),
+      0.3,
+      1.3,
+      false,
+      paint,
+    );
+
+    // Crisp outer light rim
+    paint
+      ..strokeWidth = isDashing ? 2.0 : 1.3
+      ..color = Colors.white.withValues(alpha: isDashing ? 0.92 : 0.68);
     canvas.drawCircle(center, radius, paint);
+
+    // 4. Tiny orbiting elemental pips showing equipped elements (up to 3)
+    if (elementColors.isNotEmpty) {
+      paint.style = PaintingStyle.fill;
+      final pipOrbit = radius + 4.5;
+      for (int i = 0; i < elementColors.length; i++) {
+        final a = time * 2.4 + i * (2 * pi / elementColors.length);
+        final pos = center + Offset(cos(a) * pipOrbit, sin(a) * pipOrbit);
+        paint.color = elementColors[i].withValues(alpha: 0.42);
+        canvas.drawCircle(pos, 3.4, paint);
+        paint.color = Colors.white.withValues(alpha: 0.92);
+        canvas.drawCircle(pos, 1.4, paint);
+      }
+    }
+    paint.style = PaintingStyle.fill;
+  }
+
+  void _drawRaceAura(
+    Canvas canvas,
+    Paint paint,
+    Offset center,
+    double time,
+    bool isDashing,
+  ) {
+    final pulse = 0.7 + 0.3 * sin(time * 4.0);
+    final auraR = radius * (isDashing ? 1.9 : 1.55);
+    paint
+      ..style = PaintingStyle.fill
+      ..shader = RadialGradient(
+        colors: [
+          race.themeColor.withValues(alpha: (isDashing ? 0.42 : 0.24) * pulse),
+          race.themeColor.withValues(alpha: 0),
+        ],
+      ).createShader(Rect.fromCircle(center: center, radius: auraR));
+    canvas.drawCircle(center, auraR, paint);
+    paint.shader = null;
+
+    if (race.type == RaceType.yeti) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.4
+        ..color = Colors.cyanAccent.withValues(alpha: 0.55);
+      canvas.drawCircle(center, radius + 4 + pulse * 2, paint);
+      for (int i = 0; i < 6; i++) {
+        final a = time * 1.1 + i * pi / 3;
+        final p1 = center + Offset(cos(a), sin(a)) * (radius + 2);
+        final p2 = center + Offset(cos(a), sin(a)) * (radius + 6.5);
+        canvas.drawLine(p1, p2, paint);
+      }
+    } else if (race.type == RaceType.elf) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 1.2
+        ..color = Colors.tealAccent.withValues(alpha: 0.55);
+      for (int i = 0; i < 2; i++) {
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius + 3.5),
+          time * 3.5 + i * pi,
+          1.1,
+          false,
+          paint,
+        );
+      }
+      paint.strokeCap = StrokeCap.butt;
+    } else if (race.type == RaceType.orc) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..color = Colors.redAccent.withValues(alpha: 0.45 * pulse);
+      canvas.drawCircle(center, radius + 2.5, paint);
+    } else if (race.type == RaceType.merfolk) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1
+        ..color = Colors.lightBlueAccent.withValues(alpha: 0.45);
+      canvas.drawCircle(center, radius + 2.5 + (time * 6 % 4), paint);
+    }
+    paint.style = PaintingStyle.fill;
   }
 }
 
 /// Mũi tên của Cung thủ
 class ArrowEntity extends GameEntity {
-  final double damage;
+  double damage;
+  bool isRicochet = false;
   final List<Offset> trail = [];
   final Set<String> hitBlocks = {};
   int pierceCount;
@@ -523,7 +916,7 @@ class ArrowEntity extends GameEntity {
   @override
   void update(double dt) {
     trail.insert(0, transform.position);
-    if (trail.length > 4) trail.removeLast();
+    if (trail.length > 6) trail.removeLast();
     transform.x += transform.vx * dt;
     transform.y += transform.vy * dt;
     lifeTime -= dt;
@@ -531,14 +924,23 @@ class ArrowEntity extends GameEntity {
 
   @override
   void draw(Canvas canvas, Paint paint) {
+    // Tapered glowing energy wake
     paint
+      ..shader = null
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+      ..strokeCap = StrokeCap.round;
     for (int i = 0; i < trail.length - 1; i++) {
-      paint.color = const Color(0xFFAADDB7)
-          .withValues(alpha: 0.32 * (1 - i / trail.length));
+      final prog = 1 - i / trail.length;
+      paint
+        ..strokeWidth = 4.2 * prog
+        ..color = const Color(0xFF34D399).withValues(alpha: prog * 0.25);
+      canvas.drawLine(trail[i], trail[i + 1], paint);
+      paint
+        ..strokeWidth = 1.5 * prog
+        ..color = const Color(0xFFD1FAE5).withValues(alpha: prog * 0.65);
       canvas.drawLine(trail[i], trail[i + 1], paint);
     }
+
     final center = transform.position;
     final angle = atan2(transform.vy, transform.vx);
 
@@ -546,17 +948,41 @@ class ArrowEntity extends GameEntity {
     canvas.translate(center.dx, center.dy);
     canvas.rotate(angle);
 
-    paint.color = Colors.greenAccent;
-    paint.strokeWidth = 2.5;
-    paint.style = PaintingStyle.stroke;
-    canvas.drawLine(const Offset(-10, 0), const Offset(10, 0), paint);
+    // Outer energy glow around shaft
+    paint
+      ..strokeWidth = 5.0
+      ..color = Colors.greenAccent.withValues(alpha: 0.28);
+    canvas.drawLine(const Offset(-11, 0), const Offset(11, 0), paint);
 
-    // Mũi tên nhọn
-    paint.color = Colors.white;
-    canvas.drawLine(const Offset(10, 0), const Offset(5, -4), paint);
-    canvas.drawLine(const Offset(10, 0), const Offset(5, 4), paint);
+    // Shaft
+    paint
+      ..strokeWidth = 2.2
+      ..color = const Color(0xFF6EE7B7);
+    canvas.drawLine(const Offset(-11, 0), const Offset(9, 0), paint);
+
+    // Glowing feather fletching at tail
+    paint
+      ..strokeWidth = 1.5
+      ..color = const Color(0xFFA7F3D0);
+    canvas.drawLine(const Offset(-8, 0), const Offset(-13, -3.5), paint);
+    canvas.drawLine(const Offset(-8, 0), const Offset(-13, 3.5), paint);
+
+    // Razor crystalline arrowhead
+    final head = Path()
+      ..moveTo(13, 0)
+      ..lineTo(5, -4.5)
+      ..lineTo(7, 0)
+      ..lineTo(5, 4.5)
+      ..close();
+    paint
+      ..style = PaintingStyle.fill
+      ..color = Colors.white;
+    canvas.drawPath(head, paint);
 
     canvas.restore();
+    paint
+      ..strokeCap = StrokeCap.butt
+      ..style = PaintingStyle.fill;
   }
 }
 
@@ -599,16 +1025,25 @@ class HookEntity extends GameEntity {
   @override
   void draw(Canvas canvas, Paint paint) {
     final pos = transform.position;
-    final middle =
-        (origin + pos) / 2 + Offset(0, min(14, (pos - origin).distance * 0.12));
+    final sag = isReturning ? 4.0 : min(14.0, (pos - origin).distance * 0.12);
+    final middle = (origin + pos) / 2 + Offset(0, sag);
     final line = Path()
       ..moveTo(origin.dx, origin.dy)
       ..quadraticBezierTo(middle.dx, middle.dy, pos.dx, pos.dy);
+
+    // Luminous aqua tether glow + bright core line
     paint
+      ..shader = null
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = const Color(0x7793BFC9);
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 3.0
+      ..color = const Color(0x4438BDF8);
     canvas.drawPath(line, paint);
+    paint
+      ..strokeWidth = 1.1
+      ..color = const Color(0xCCD8F6FF);
+    canvas.drawPath(line, paint);
+
     canvas.save();
     canvas.translate(pos.dx, pos.dy);
     canvas.rotate(
@@ -616,18 +1051,39 @@ class HookEntity extends GameEntity {
           ? atan2(origin.dy - pos.dy, origin.dx - pos.dx)
           : atan2(transform.vy, transform.vx),
     );
+
+    // Water splash wake around hook
     paint
-      ..strokeWidth = 1.6
-      ..color = const Color(0xFFD1E5EA);
+      ..strokeWidth = 1.2
+      ..color = const Color(0x887DD3FC);
+    canvas.drawArc(
+      Rect.fromCircle(center: const Offset(-2, 0), radius: 7.5),
+      pi * 0.65,
+      pi * 0.7,
+      false,
+      paint,
+    );
+
+    // Gleaming metallic barbed harpoon hook
     final hook = Path()
-      ..moveTo(-5, 0)
-      ..lineTo(3, 0)
-      ..quadraticBezierTo(8, 0, 7, 5)
-      ..quadraticBezierTo(5, 8, 3, 4)
-      ..lineTo(2, 6);
+      ..moveTo(-6, 0)
+      ..lineTo(4, 0)
+      ..quadraticBezierTo(10, 0, 8.5, 6)
+      ..quadraticBezierTo(6, 9.5, 3, 5)
+      ..lineTo(1.5, 7);
+    paint
+      ..strokeWidth = 3.5
+      ..color = const Color(0x5538BDF8);
     canvas.drawPath(hook, paint);
+    paint
+      ..strokeWidth = 1.9
+      ..color = Colors.white;
+    canvas.drawPath(hook, paint);
+
     canvas.restore();
-    paint.style = PaintingStyle.fill;
+    paint
+      ..strokeCap = StrokeCap.butt
+      ..style = PaintingStyle.fill;
   }
 }
 
@@ -657,29 +1113,69 @@ class DropItem extends GameEntity {
   }
 
   @override
-  void draw(Canvas canvas, Paint paint) {
+  void draw(Canvas canvas, Paint paint, {double time = 0}) {
     final pos = transform.position;
+    final phase = time * 4.5 + id.hashCode * 0.37;
+    paint
+      ..shader = null
+      ..maskFilter = null;
+
     if (type == DropType.gold) {
-      // Đồng tiền vàng lấp lánh
-      paint.color = Colors.amber;
-      paint.style = PaintingStyle.fill;
-      canvas.drawCircle(pos, 5, paint);
-      paint.color = Colors.white;
-      paint.style = PaintingStyle.stroke;
-      paint.strokeWidth = 1.0;
-      canvas.drawCircle(pos, 5, paint);
+      // Soft golden halo
+      paint
+        ..style = PaintingStyle.fill
+        ..color = Colors.amber.withValues(alpha: 0.24);
+      canvas.drawCircle(pos, 7.2, paint);
+
+      // Animated spinning 3D coin silhouette
+      final spinW = 3.0 + (cos(phase).abs()) * 2.2;
+      final coinRect = Rect.fromCenter(center: pos, width: spinW * 2, height: 9.6);
+      paint.color = const Color(0xFFF59E0B);
+      canvas.drawOval(coinRect, paint);
+      paint.color = const Color(0xFFFDE047);
+      canvas.drawOval(coinRect.deflate(1.2), paint);
+      // Specular gleam
+      paint.color = Colors.white.withValues(alpha: 0.85);
+      canvas.drawCircle(pos + Offset(-spinW * 0.25, -1.8), 1.2, paint);
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.9
+        ..color = const Color(0xFFFFFBEB);
+      canvas.drawOval(coinRect, paint);
     } else {
-      // Ngọc EXP xanh lục/lam đa giác
-      paint.color = Colors.cyanAccent;
-      paint.style = PaintingStyle.fill;
+      // Glowing faceted cyan-violet EXP crystal
+      final pulse = 0.85 + 0.15 * sin(phase);
+      paint
+        ..style = PaintingStyle.fill
+        ..color = Colors.cyanAccent.withValues(alpha: 0.25 * pulse);
+      canvas.drawCircle(pos, 8.0 * pulse, paint);
+
       final path = Path()
-        ..moveTo(pos.dx, pos.dy - 6)
-        ..lineTo(pos.dx + 5, pos.dy)
-        ..lineTo(pos.dx, pos.dy + 6)
-        ..lineTo(pos.dx - 5, pos.dy)
+        ..moveTo(pos.dx, pos.dy - 6.5)
+        ..lineTo(pos.dx + 4.8, pos.dy)
+        ..lineTo(pos.dx, pos.dy + 6.5)
+        ..lineTo(pos.dx - 4.8, pos.dy)
         ..close();
+      paint.color = const Color(0xFF22D3EE);
+      canvas.drawPath(path, paint);
+
+      // Inner bright crystal facet
+      final facet = Path()
+        ..moveTo(pos.dx, pos.dy - 5.2)
+        ..lineTo(pos.dx + 3.2, pos.dy)
+        ..lineTo(pos.dx, pos.dy + 1.5)
+        ..lineTo(pos.dx - 2.0, pos.dy)
+        ..close();
+      paint.color = Colors.white.withValues(alpha: 0.72);
+      canvas.drawPath(facet, paint);
+
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.9
+        ..color = const Color(0xFFE0F2FE);
       canvas.drawPath(path, paint);
     }
+    paint.style = PaintingStyle.fill;
   }
 }
 
@@ -687,7 +1183,7 @@ class DropItem extends GameEntity {
 class ShockwaveRing {
   Offset center;
   double radius = 4.0;
-  double maxRadius = 48.0;
+  double maxRadius = 52.0;
   Color color;
   double lifeTime = 0.28;
   double currentLife = 0.28;
@@ -697,16 +1193,27 @@ class ShockwaveRing {
   bool update(double dt) {
     currentLife -= dt;
     final progress = 1.0 - (currentLife / lifeTime).clamp(0.0, 1.0);
-    radius = 4.0 + (maxRadius - 4.0) * progress;
+    final easeOut = 1 - pow(1 - progress, 3).toDouble();
+    radius = 4.0 + (maxRadius - 4.0) * easeOut;
     return currentLife <= 0;
   }
 
   void draw(Canvas canvas, Paint paint) {
     final alpha = (currentLife / lifeTime).clamp(0.0, 1.0);
-    paint.color = color.withValues(alpha: alpha * 0.8);
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 3.0 * alpha;
+    paint
+      ..shader = null
+      ..style = PaintingStyle.stroke;
+    // Soft outer bloom ring
+    paint
+      ..color = color.withValues(alpha: alpha * 0.35)
+      ..strokeWidth = 6.5 * alpha;
     canvas.drawCircle(center, radius, paint);
+    // Crisp bright inner core ring
+    paint
+      ..color = Color.lerp(color, Colors.white, 0.55)!.withValues(alpha: alpha * 0.92)
+      ..strokeWidth = 1.8 * alpha + 0.4;
+    canvas.drawCircle(center, radius * 0.92, paint);
+    paint.style = PaintingStyle.fill;
   }
 }
 
@@ -739,7 +1246,7 @@ class PixelDebris {
   bool update(double dt) {
     x += vx * dt;
     y += vy * dt;
-    vy += 190 * dt; // Trọng lực nhẹ rơi xuống
+    vy += 210 * dt; // Trọng lực nhẹ rơi xuống
     rotation += rotSpeed * dt;
     lifeTime -= dt;
     alpha = (lifeTime / maxLife).clamp(0.0, 1.0);
@@ -747,20 +1254,38 @@ class PixelDebris {
   }
 
   void draw(Canvas canvas, Paint paint) {
-    paint.color = color.withValues(alpha: alpha);
-    paint.style = PaintingStyle.fill;
+    paint
+      ..shader = null
+      ..maskFilter = null
+      ..style = PaintingStyle.fill;
     canvas.save();
     canvas.translate(x, y);
     canvas.rotate(rotation);
     if (isSparkle) {
-      paint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-      canvas.drawCircle(Offset.zero, size * 0.8, paint);
-      paint.maskFilter = null;
+      // Glowing 4-point diamond spark
+      final r = size * (1.2 + alpha * 0.8);
+      paint.color = color.withValues(alpha: alpha * 0.35);
+      canvas.drawCircle(Offset.zero, r * 1.4, paint);
+      final star = Path()
+        ..moveTo(0, -r)
+        ..lineTo(r * 0.32, -r * 0.32)
+        ..lineTo(r, 0)
+        ..lineTo(r * 0.32, r * 0.32)
+        ..lineTo(0, r)
+        ..lineTo(-r * 0.32, r * 0.32)
+        ..lineTo(-r, 0)
+        ..lineTo(-r * 0.32, -r * 0.32)
+        ..close();
+      paint.color = Color.lerp(color, Colors.white, 0.65)!.withValues(alpha: alpha);
+      canvas.drawPath(star, paint);
     } else {
-      canvas.drawRect(
-        Rect.fromCenter(center: Offset.zero, width: size, height: size),
-        paint,
-      );
+      // Crisp tumbling beveled pixel shard
+      final s = size * (0.7 + alpha * 0.55);
+      paint.color = color.withValues(alpha: alpha);
+      final rect = Rect.fromCenter(center: Offset.zero, width: s, height: s);
+      canvas.drawRect(rect, paint);
+      paint.color = Colors.white.withValues(alpha: alpha * 0.55);
+      canvas.drawRect(Rect.fromLTWH(rect.left, rect.top, s, s * 0.35), paint);
     }
     canvas.restore();
   }
@@ -782,8 +1307,17 @@ class FloatingText {
     required this.color,
   });
 
+  double get ageProgress => (1.0 - lifeTime / 0.8).clamp(0.0, 1.0);
+
+  double get popScale {
+    final p = ageProgress;
+    if (p < 0.16) return 0.72 + (p / 0.16) * 0.48;
+    if (p < 0.32) return 1.2 - ((p - 0.16) / 0.16) * 0.2;
+    return 1.0;
+  }
+
   bool update(double dt) {
-    y -= 38 * dt; // Bay lên trên
+    y -= (44 - ageProgress * 18) * dt; // Pop nhanh rồi trôi chậm dần
     lifeTime -= dt;
     alpha = (lifeTime / 0.8).clamp(0.0, 1.0);
     return lifeTime <= 0;
@@ -811,32 +1345,43 @@ class MistZone {
 
   void draw(Canvas canvas, Paint paint) {
     final fade = (duration / 0.7).clamp(0.0, 1.0);
+    // Volumetric soft radial mist billows
+    for (int i = 0; i < 4; i++) {
+      final driftX = sin(duration * 1.4 + i * 1.9) * radius * 0.18;
+      final driftY = cos(duration * 1.1 + i * 1.5) * radius * 0.14;
+      final puffCenter = center + Offset(driftX, driftY);
+      final puffR = radius * (0.72 + (i % 2) * 0.18);
+      paint
+        ..style = PaintingStyle.fill
+        ..shader = RadialGradient(
+          colors: [
+            const Color(0xFFD9F3F8).withValues(alpha: fade * 0.19),
+            const Color(0xFF94C5D4).withValues(alpha: fade * 0.09),
+            const Color(0x0094C5D4),
+          ],
+        ).createShader(Rect.fromCircle(center: puffCenter, radius: puffR));
+      canvas.drawCircle(puffCenter, puffR, paint);
+    }
+    paint.shader = null;
+
+    // Swirling vapor arcs around perimeter
     paint
-      ..style = PaintingStyle.fill
-      ..color = const Color(0xFFBFCDD2).withValues(alpha: fade * 0.09);
-    for (int i = 0; i < 3; i++) {
-      final drift = sin(duration * 1.2 + i * 2) * radius * 0.12;
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: center + Offset(drift, (i - 1) * radius * 0.2),
-          width: radius * (1.5 - i * 0.15),
-          height: radius * 0.75,
-        ),
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 1.4
+      ..color = const Color(0xFFD4F5F8).withValues(alpha: fade * 0.38);
+    for (int i = 0; i < 2; i++) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius * (0.85 - i * 0.16)),
+        duration * (0.7 + i * 0.4) + i * pi,
+        2.1,
+        false,
         paint,
       );
     }
     paint
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = const Color(0xFFCCE4E6).withValues(alpha: fade * 0.25);
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius * 0.8),
-      duration * 0.4,
-      2.4,
-      false,
-      paint,
-    );
-    paint.style = PaintingStyle.fill;
+      ..strokeCap = StrokeCap.butt
+      ..style = PaintingStyle.fill;
   }
 }
 
@@ -871,7 +1416,7 @@ class OrbitingSpirit {
 
     final currentPos = getPosition(center);
     trail.insert(0, currentPos);
-    if (trail.length > 6) trail.removeLast();
+    if (trail.length > 9) trail.removeLast();
   }
 
   Offset getPosition(Offset center) {
@@ -881,30 +1426,74 @@ class OrbitingSpirit {
     );
   }
 
-  void draw(Canvas canvas, Paint paint, Offset center) {
+  void draw(Canvas canvas, Paint paint, Offset center, {double time = 0}) {
     final pos = getPosition(center);
+    paint
+      ..shader = null
+      ..maskFilter = null;
 
-    // Vệt sáng theo sau tinh linh
-    for (int i = trail.length - 1; i >= 0; i--) {
-      final tPos = trail[i];
-      final prog = 1.0 - (i / trail.length);
-      final trailPaint = Paint()..color = color.withValues(alpha: prog * 0.35);
-      canvas.drawCircle(tPos, size * (0.4 + prog * 0.5), trailPaint);
+    // Smooth tapered ethereal wisp ribbon tail
+    if (trail.length >= 2) {
+      paint
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+      for (int i = trail.length - 1; i >= 1; i--) {
+        final prog = 1.0 - (i / trail.length);
+        paint
+          ..strokeWidth = size * (0.3 + prog * 1.1)
+          ..color = color.withValues(alpha: prog * 0.34);
+        canvas.drawLine(trail[i], trail[i - 1], paint);
+        paint
+          ..strokeWidth = size * (0.12 + prog * 0.35)
+          ..color = Colors.white.withValues(alpha: prog * 0.45);
+        canvas.drawLine(trail[i], trail[i - 1], paint);
+      }
+      paint.strokeCap = StrokeCap.butt;
     }
 
-    // Hào quang tinh linh
-    final glowPaint = Paint()..color = color.withValues(alpha: 0.55);
-    canvas.drawCircle(pos, size * 1.6, glowPaint);
+    // Soft radial aura bloom
+    paint
+      ..style = PaintingStyle.fill
+      ..shader = RadialGradient(
+        colors: [
+          Colors.white.withValues(alpha: 0.9),
+          color.withValues(alpha: 0.65),
+          color.withValues(alpha: 0),
+        ],
+        stops: const [0.0, 0.42, 1.0],
+      ).createShader(Rect.fromCircle(center: pos, radius: size * 2.2));
+    canvas.drawCircle(pos, size * 2.2, paint);
+    paint.shader = null;
 
-    // Lõi tinh linh phát sáng
-    paint.color = Colors.white;
-    paint.style = PaintingStyle.fill;
-    canvas.drawCircle(pos, size * 0.6, paint);
+    // Rotating miniature rune ring around the wisp
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.1
+      ..color = Colors.white.withValues(alpha: 0.65);
+    canvas.drawArc(
+      Rect.fromCircle(center: pos, radius: size * 1.15),
+      time * 4.5 + angle,
+      pi * 1.1,
+      false,
+      paint,
+    );
 
-    paint.color = color;
-    paint.style = PaintingStyle.stroke;
-    paint.strokeWidth = 2.0;
-    canvas.drawCircle(pos, size, paint);
+    // Sparkling 4-point star core
+    final r = size * 0.95;
+    final star = Path()
+      ..moveTo(pos.dx, pos.dy - r)
+      ..lineTo(pos.dx + r * 0.35, pos.dy - r * 0.35)
+      ..lineTo(pos.dx + r, pos.dy)
+      ..lineTo(pos.dx + r * 0.35, pos.dy + r * 0.35)
+      ..lineTo(pos.dx, pos.dy + r)
+      ..lineTo(pos.dx - r * 0.35, pos.dy + r * 0.35)
+      ..lineTo(pos.dx - r, pos.dy)
+      ..lineTo(pos.dx - r * 0.35, pos.dy - r * 0.35)
+      ..close();
+    paint
+      ..style = PaintingStyle.fill
+      ..color = Colors.white;
+    canvas.drawPath(star, paint);
   }
 }
 
@@ -919,7 +1508,7 @@ class LightningArc {
   LightningArc({
     required this.points,
     required this.color,
-    this.lifeTime = 0.16,
+    this.lifeTime = 0.18,
   }) : maxLife = lifeTime;
 
   bool update(double dt) {
@@ -935,23 +1524,38 @@ class LightningArc {
       ..maskFilter = null
       ..style = PaintingStyle.stroke
       ..strokeJoin = StrokeJoin.round
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 3.0
-      ..color = color.withValues(alpha: alpha * 0.35);
-    canvas.drawPath(_path, paint);
+      ..strokeCap = StrokeCap.round;
+
+    // 1. Wide luminous electric outer bloom
     paint
-      ..strokeWidth = 1.1
-      ..color = const Color(0xFFFFF1CE).withValues(alpha: alpha * 0.95);
+      ..strokeWidth = 6.5 * alpha + 1.0
+      ..color = color.withValues(alpha: alpha * 0.25);
     canvas.drawPath(_path, paint);
+
+    // 2. Vivid mid plasma channel
     paint
-      ..strokeCap = StrokeCap.butt
-      ..style = PaintingStyle.fill;
+      ..strokeWidth = 2.6 * alpha + 0.6
+      ..color = color.withValues(alpha: alpha * 0.8);
+    canvas.drawPath(_path, paint);
+
+    // 3. White-hot razor core
+    paint
+      ..strokeWidth = 1.2
+      ..color = const Color(0xFFFFFCEB).withValues(alpha: alpha);
+    canvas.drawPath(_path, paint);
+
+    // 4. Endpoint spark flashes
+    paint.style = PaintingStyle.fill;
+    paint.color = Colors.white.withValues(alpha: alpha * 0.9);
+    canvas.drawCircle(points.first, 2.2 * alpha + 0.5, paint);
+    canvas.drawCircle(points.last, 2.8 * alpha + 0.8, paint);
+    paint.strokeCap = StrokeCap.butt;
   }
 
   static LightningArc createZigzag(Offset start, Offset end, Color color) {
     final List<Offset> pts = [start];
     final dist = (end - start).distance;
-    final segments = (dist / 14.0).clamp(3, 10).toInt();
+    final segments = (dist / 13.0).clamp(3, 10).toInt();
     final rng = Random();
 
     for (int i = 1; i < segments; i++) {
@@ -963,7 +1567,7 @@ class LightningArc {
       // Độ lệch zigzag vuông góc
       final perpX = -(end.dy - start.dy) / (dist > 0 ? dist : 1);
       final perpY = (end.dx - start.dx) / (dist > 0 ? dist : 1);
-      final offsetDist = (rng.nextDouble() - 0.5) * 16.0;
+      final offsetDist = (rng.nextDouble() - 0.5) * 18.0;
       pts.add(
         Offset(interp.dx + perpX * offsetDist, interp.dy + perpY * offsetDist),
       );
@@ -982,21 +1586,45 @@ class VoidVortexZone {
   VoidVortexZone(this.center);
 
   void draw(Canvas canvas) {
-    final paint = Paint()..color = const Color(0xBB140B26);
-    canvas.drawCircle(center, 18, paint);
+    final fade = (life / 0.5).clamp(0.0, 1.0);
+    final paint = Paint();
+
+    // Outer gravitational violet bloom
+    paint.shader = RadialGradient(
+      colors: [
+        const Color(0xFF060312).withValues(alpha: fade * 0.96),
+        const Color(0xFF2E1065).withValues(alpha: fade * 0.85),
+        const Color(0xFFA855F7).withValues(alpha: fade * 0.35),
+        const Color(0x00A855F7),
+      ],
+      stops: const [0.0, 0.35, 0.62, 1.0],
+    ).createShader(Rect.fromCircle(center: center, radius: 48));
+    canvas.drawCircle(center, 48, paint);
+    paint.shader = null;
+
+    // Counter-rotating luminous accretion arcs
     paint
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..color = Colors.purpleAccent.withValues(alpha: (life / 2.5).clamp(0, 1));
-    for (int i = 0; i < 3; i++) {
+      ..strokeCap = StrokeCap.round;
+    for (int i = 0; i < 4; i++) {
+      paint
+        ..strokeWidth = 2.6 - i * 0.35
+        ..color = (i.isEven ? const Color(0xFFD8B4FE) : const Color(0xFFF472B6))
+            .withValues(alpha: fade * (0.85 - i * 0.14));
       canvas.drawArc(
-        Rect.fromCircle(center: center, radius: 22.0 + i * 9),
-        life * 4 + i * 2,
-        1.6,
+        Rect.fromCircle(center: center, radius: 19.0 + i * 7.5),
+        (i.isEven ? 1 : -1) * life * 5.2 + i * 1.7,
+        1.8,
         false,
         paint,
       );
     }
+
+    // Event horizon bright photon rim
+    paint
+      ..strokeWidth = 1.6
+      ..color = const Color(0xFFF5D0FE).withValues(alpha: fade * 0.9);
+    canvas.drawCircle(center, 15, paint);
   }
 }
 
@@ -1022,91 +1650,130 @@ class ElementImpact {
   }
 
   Color get color => switch (element) {
-    ElementType.fire => const Color(0xFFF0A064),
-    ElementType.frost => const Color(0xFFAAE2F4),
-    ElementType.poison => const Color(0xFFB3D48A),
-    ElementType.water => const Color(0xFF7BCDE7),
-    ElementType.lightning => const Color(0xFFFFD987),
-    ElementType.voidDark => const Color(0xFFC7A5F2),
-    ElementType.wind => const Color(0xFF9CDDD5),
-    _ => const Color(0xFFE8D8B9),
+    ElementType.fire => const Color(0xFFFF8A4C),
+    ElementType.frost => const Color(0xFF93E8FF),
+    ElementType.poison => const Color(0xFFA3E635),
+    ElementType.water => const Color(0xFF38BDF8),
+    ElementType.lightning => const Color(0xFFFDE047),
+    ElementType.voidDark => const Color(0xFFC084FC),
+    ElementType.wind => const Color(0xFF5EEAD4),
+    _ => const Color(0xFFFFE4B5),
   };
 
   void draw(Canvas canvas, Paint paint) {
     final t = (age / duration).clamp(0.0, 1.0);
     final ease = 1 - pow(1 - t, 3).toDouble();
-    final reach = radius * (0.18 + ease * 0.82);
+    final reach = radius * (0.2 + ease * 0.85);
+    final alpha = (1 - t);
+
     paint
       ..shader = null
-      ..maskFilter = null
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.5 * (1 - t) + 0.3
-      ..color = color.withValues(alpha: (1 - t) * 0.8);
+      ..maskFilter = null;
+
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(angle);
+
+    // Subtle radial impact flash
+    if (t < 0.45) {
+      final f = 1 - t / 0.45;
+      paint
+        ..style = PaintingStyle.fill
+        ..shader = RadialGradient(
+          colors: [
+            Colors.white.withValues(alpha: f * 0.65),
+            color.withValues(alpha: f * 0.35),
+            color.withValues(alpha: 0),
+          ],
+        ).createShader(Rect.fromCircle(center: Offset.zero, radius: reach * 0.85));
+      canvas.drawCircle(Offset.zero, reach * 0.85, paint);
+      paint.shader = null;
+    }
+
+    paint
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2.2 * alpha + 0.5
+      ..color = color.withValues(alpha: alpha * 0.9);
+
     if (element == ElementType.water || element == ElementType.wind) {
       for (int i = 0; i < 2; i++) {
         canvas.drawArc(
-          Rect.fromCircle(center: Offset.zero, radius: reach * (1 - i * 0.3)),
-          i * pi + t,
-          pi * 0.8,
+          Rect.fromCircle(center: Offset.zero, radius: reach * (1 - i * 0.32)),
+          i * pi + t * 1.4,
+          pi * 0.85,
           false,
           paint,
         );
+      }
+      if (element == ElementType.water) {
+        paint.style = PaintingStyle.fill;
+        for (int i = 0; i < 4; i++) {
+          final a = i * pi / 2 + 0.4;
+          paint.color = const Color(0xFFE0F7FA).withValues(alpha: alpha * 0.85);
+          canvas.drawCircle(Offset(cos(a), sin(a)) * reach * 0.9, 2.0 * alpha + 0.5, paint);
+        }
       }
     } else if (element == ElementType.fire || element == ElementType.voidDark) {
       for (int i = 0; i < 3; i++) {
         canvas.drawArc(
           Rect.fromCircle(center: Offset.zero, radius: reach),
-          i * pi * 2 / 3 + t * 1.5,
-          0.8,
+          i * pi * 2 / 3 + t * 2.0,
+          0.95,
           false,
           paint,
         );
       }
-    } else if (element == ElementType.poison) {
       paint.style = PaintingStyle.fill;
       for (int i = 0; i < 5; i++) {
-        final a = i * pi * 2 / 5;
-        canvas.drawCircle(
-          Offset(cos(a), sin(a)) * reach,
-          (1 - t) * 2.2 + 0.3,
-          paint,
-        );
+        final a = i * pi * 2 / 5 + t * 1.2;
+        paint.color = (element == ElementType.fire
+                ? const Color(0xFFFFF3B0)
+                : const Color(0xFFF5D0FE))
+            .withValues(alpha: alpha * 0.9);
+        canvas.drawCircle(Offset(cos(a), sin(a)) * reach * 0.82, 2.1 * alpha + 0.4, paint);
+      }
+    } else if (element == ElementType.poison) {
+      paint.strokeWidth = 1.4 * alpha + 0.4;
+      canvas.drawCircle(Offset.zero, reach * 0.72, paint);
+      paint.style = PaintingStyle.fill;
+      for (int i = 0; i < 6; i++) {
+        final a = i * pi / 3 + 0.3;
+        final pt = Offset(cos(a), sin(a)) * reach * (0.75 + (i % 2) * 0.28);
+        paint.color = color.withValues(alpha: alpha * 0.9);
+        canvas.drawCircle(pt, 2.8 * alpha + 0.5, paint);
       }
     } else if (element == ElementType.none) {
+      // Crisp bright melee/collision slash spark
       canvas.drawArc(
         Rect.fromCircle(center: Offset.zero, radius: reach),
-        -0.65,
-        1.3,
+        -0.75,
+        1.5,
         false,
         paint,
       );
-      canvas.drawLine(Offset(-reach * 0.3, 0), Offset(reach * 0.5, 0), paint);
+      paint
+        ..strokeWidth = 1.6 * alpha + 0.4
+        ..color = Colors.white.withValues(alpha: alpha * 0.9);
+      canvas.drawLine(Offset(-reach * 0.45, 0), Offset(reach * 0.65, 0), paint);
+      canvas.drawLine(Offset(0, -reach * 0.4), Offset(0, reach * 0.4), paint);
     } else {
-      for (int i = 0; i < 5; i++) {
-        final a = i * pi * 2 / 5;
-        final start = Offset(cos(a), sin(a)) * reach * 0.5;
-        final end = Offset(cos(a + 0.12), sin(a + 0.12)) * reach;
+      // Frost crystalline burst or Lightning electric sparks
+      for (int i = 0; i < 6; i++) {
+        final a = i * pi / 3;
+        final start = Offset(cos(a), sin(a)) * reach * 0.35;
+        final end = Offset(cos(a + 0.1), sin(a + 0.1)) * reach;
         canvas.drawLine(start, end, paint);
         if (element == ElementType.frost) {
           canvas.drawLine(
             end,
-            end + Offset(cos(a + 2.5), sin(a + 2.5)) * radius * 0.15,
+            end + Offset(cos(a + 2.4), sin(a + 2.4)) * radius * 0.18,
             paint,
           );
         }
       }
     }
-    if (t < 0.35) {
-      paint
-        ..style = PaintingStyle.fill
-        ..color = const Color(0xFFFFF3D8)
-            .withValues(alpha: (1 - t / 0.35) * 0.6);
-      canvas.drawCircle(Offset.zero, radius * 0.1, paint);
-    }
+
     canvas.restore();
     paint
       ..style = PaintingStyle.fill

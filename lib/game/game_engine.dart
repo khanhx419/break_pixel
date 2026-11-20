@@ -138,12 +138,30 @@ class GameEngine extends ChangeNotifier {
   double _fireBurstCooldown = 0.0;
   double _lightningCooldown = 0.0;
   double _firestormTimer = 0.0;
+  double _reactionCooldown = 0.0;
+
+  // Cơ chế nâng cấp: Lướt Húc Chí Mạng, Combo & Cuồng Nộ (Overdrive), Từ Trường & Nội tại Nghề
+  bool isDashSmashReady = false;
+  double dashActiveTimer = 0.0;
+  int comboCount = 0;
+  double comboTimer = 0.0;
+  double feverProgress = 0.0;
+  double overdriveTimer = 0.0;
+  bool get isOverdriveActive => overdriveTimer > 0;
+  double magnetSurgeTimer = 0.0;
+  double harvestHasteTimer = 0.0;
+  int _collectedDropsCounter = 0;
+  int _warriorSlashCounter = 0;
+  double _warriorWaveCooldown = 0.0;
 
   double get weaponSpinSpeedMultiplier =>
       (1.0 + min(spinUpgradeLevel, 8) * 0.18) *
       (equippedElements.contains(ElementType.wind)
           ? (race.type == RaceType.elf ? 1.35 : 1.25)
-          : 1.0);
+          : 1.0) *
+      (1.0 + min(comboCount ~/ 10, 5) * 0.04) *
+      (isOverdriveActive ? 1.28 : 1.0) *
+      (harvestHasteTimer > 0 ? 1.18 : 1.0);
 
   final Map<String, double> _elementHitTimers = {};
   bool get isFirestormActive => _firestormTimer > 0;
@@ -369,6 +387,7 @@ class GameEngine extends ChangeNotifier {
         final isCenterEmpty =
             (r == centerRow1 || r == centerRow2) &&
             (c == centerCol1 || c == centerCol2);
+        final specialType = _pickSpecialBlockType(r, c, isCenterEmpty);
 
         final block = PixelBlock(
           id: 'block_${r}_$c',
@@ -385,6 +404,7 @@ class GameEngine extends ChangeNotifier {
           row: r,
           memeColor: memeColor,
           isCenterEmpty: isCenterEmpty,
+          specialType: specialType,
         );
 
         if (isCenterEmpty) {
@@ -403,6 +423,16 @@ class GameEngine extends ChangeNotifier {
     totalBlocksCount = breakableCount > 0 ? breakableCount : 1;
     brokenBlocksCount = 0;
     completionPercent = 0.0;
+  }
+
+  BlockSpecialType _pickSpecialBlockType(int r, int c, bool isCenterEmpty) {
+    if (isCenterEmpty || r < 2 || c < 2) return BlockSpecialType.none;
+    final hash = (r * 73 + c * 41 + level.id * 19) % 97;
+    if (hash == 7) return BlockSpecialType.explosiveCrystal;
+    if (hash == 23) return BlockSpecialType.energyCore;
+    if (hash == 51) return BlockSpecialType.magnetBeacon;
+    if (hash == 79) return BlockSpecialType.overdriveRune;
+    return BlockSpecialType.none;
   }
 
   double _calculateBlockHp(int row, int col, int totalRows, int totalCols) {
@@ -523,7 +553,15 @@ class GameEngine extends ChangeNotifier {
     _elementHitTimers.clear();
     impacts.clear();
     _firestormTimer = 0;
-    _fireBurstCooldown = _lightningCooldown = 0;
+    _fireBurstCooldown = _lightningCooldown = _reactionCooldown = 0;
+    isDashSmashReady = false;
+    dashActiveTimer = 0;
+    comboCount = 0;
+    comboTimer = 0;
+    overdriveTimer = 0;
+    magnetSurgeTimer = 0;
+    harvestHasteTimer = 0;
+    _warriorWaveCooldown = 0;
     screenShake = 0;
     shakeOffset = Offset.zero;
     player.trail.clear();
@@ -609,9 +647,24 @@ class GameEngine extends ChangeNotifier {
       shakeOffset = Offset.zero;
     }
 
-    // Giảm cooldown các hiệu ứng nguyên tố
+    // Giảm cooldown các hiệu ứng nguyên tố & cơ chế chiến đấu
     if (_fireBurstCooldown > 0) _fireBurstCooldown -= dt;
     if (_lightningCooldown > 0) _lightningCooldown -= dt;
+    if (_reactionCooldown > 0) _reactionCooldown -= dt;
+    if (_warriorWaveCooldown > 0) _warriorWaveCooldown -= dt;
+    if (dashActiveTimer > 0) {
+      dashActiveTimer = max(0, dashActiveTimer - dt);
+      if (dashActiveTimer <= 0) isDashSmashReady = false;
+    }
+    if (comboTimer > 0) {
+      comboTimer = max(0, comboTimer - dt);
+      if (comboTimer <= 0) comboCount = 0;
+    }
+    if (overdriveTimer > 0) overdriveTimer = max(0, overdriveTimer - dt);
+    if (magnetSurgeTimer > 0) magnetSurgeTimer = max(0, magnetSurgeTimer - dt);
+    if (harvestHasteTimer > 0) {
+      harvestHasteTimer = max(0, harvestHasteTimer - dt);
+    }
     if (_firestormTimer > 0) {
       _firestormTimer -= dt;
       _updateFirestormAura(dt);
@@ -668,6 +721,10 @@ class GameEngine extends ChangeNotifier {
               block.elementAffinity?.applyShock(1.2);
             case ElementType.poison:
               block.elementAffinity?.applyPoison(3, elementDamage * 0.2);
+            case ElementType.water:
+              block.elementAffinity?.applyWater(3.5);
+            case ElementType.voidDark:
+              block.elementAffinity?.applyVoid(2.5);
             default:
               break;
           }
@@ -821,13 +878,40 @@ class GameEngine extends ChangeNotifier {
           }
         }
 
-        // Gây sát thương va chạm
+        // Gây sát thương va chạm (+ Cú Húc Chí Mạng khi đang Lướt)
         double collisionDmg =
             totalDamage *
             0.8 *
             (equippedElements.contains(ElementType.earth) ? 1.2 : 1.0);
         if (race.type == RaceType.yeti) {
           block.elementAffinity?.applyFrost(3.0);
+        }
+        if (isDashSmashReady && dashActiveTimer > 0) {
+          isDashSmashReady = false;
+          collisionDmg *= 2.0;
+          screenShake = max(screenShake, 2.2);
+          shockwaves.add(
+            ShockwaveRing(
+              center: block.transform.position,
+              color: role.themeColor,
+            ),
+          );
+          floatingTexts.add(
+            FloatingText(
+              text: '💥 HÚC PHÁ!',
+              x: block.transform.x,
+              y: block.transform.y - 14,
+              color: Colors.amberAccent,
+            ),
+          );
+          for (final neighbor in _blocksNear(
+            block.transform.position,
+            gridBlockSize * 1.45,
+          )) {
+            if (neighbor != block) {
+              _damageBlock(neighbor, collisionDmg * 0.45, 'HÚC LAN');
+            }
+          }
         }
         _damageBlock(block, collisionDmg, 'VA CHẠM');
         break; // Mỗi frame xử lý 1 va chạm chính
@@ -969,6 +1053,7 @@ class GameEngine extends ChangeNotifier {
     double dt,
     String hitLabel,
   ) {
+    final effectiveTempo = meleeTempo * (isOverdriveActive ? 1.25 : 1.0);
     for (final block in _blocksInRect(
       Rect.fromPoints(start, end).inflate(role.type == RoleType.farmer ? 6 : 2),
     )) {
@@ -978,7 +1063,41 @@ class GameEngine extends ChangeNotifier {
         end,
         rect.inflate(role.type == RoleType.farmer ? 4 : 0),
       )) {
-        _damageBlock(block, dmg * dt * 4.0 * meleeTempo, hitLabel);
+        // Nội tại Tiều Phu: Bổ Phá Giáp (+25% sát thương lên khối còn >65% HP)
+        final armorBreak =
+            (role.type == RoleType.lumberjack && block.health!.hpPercent > 0.65)
+            ? 1.25
+            : 1.0;
+        _damageBlock(
+          block,
+          dmg * dt * 4.0 * effectiveTempo * armorBreak,
+          hitLabel,
+        );
+        // Nội tại Chiến Binh: Tích Kiếm Khí phóng xuyên 3 khối
+        if (role.type == RoleType.warrior && _warriorWaveCooldown <= 0) {
+          _warriorSlashCounter++;
+          if (_warriorSlashCounter >= 14) {
+            _warriorSlashCounter = 0;
+            _warriorWaveCooldown = 1.6;
+            final wAngle = player.weaponAngle;
+            arrows.add(
+              ArrowEntity(
+                id: 'wave_${DateTime.now().microsecondsSinceEpoch}',
+                transform: TransformComponent(
+                  x: start.dx,
+                  y: start.dy,
+                  vx: cos(wAngle) * 340.0,
+                  vy: sin(wAngle) * 340.0,
+                  width: 16,
+                  height: 16,
+                ),
+                damage: totalDamage * 0.95,
+                pierceCount: 3,
+                lifeTime: 0.75,
+              ),
+            );
+          }
+        }
       }
     }
   }
@@ -1022,10 +1141,18 @@ class GameEngine extends ChangeNotifier {
       if (t.x <= minX + 10 || t.x >= maxX - 10) {
         t.x = t.x.clamp(minX + 10, maxX - 10);
         t.vx = t.x <= minX + 10 ? t.vx.abs() : -t.vx.abs();
+        if (!arrow.isRicochet) {
+          arrow.isRicochet = true;
+          arrow.damage *= 1.25;
+        }
       }
       if (t.y <= minY + 10 || t.y >= maxY - 10) {
         t.y = t.y.clamp(minY + 10, maxY - 10);
         t.vy = t.y <= minY + 10 ? t.vy.abs() : -t.vy.abs();
+        if (!arrow.isRicochet) {
+          arrow.isRicochet = true;
+          arrow.damage *= 1.25;
+        }
       }
       final aPos = arrow.transform.position;
       if (arrow.lifeTime <= 0 ||
@@ -1065,6 +1192,18 @@ class GameEngine extends ChangeNotifier {
         hook.isReturning = true;
         hook.transform.x = hook.transform.x.clamp(minX + 6, maxX - 6);
         hook.transform.y = hook.transform.y.clamp(minY + 6, maxY - 6);
+      }
+      if (hook.isReturning) {
+        // Nội tại Người Đánh Cá: Móc câu kéo theo Vàng & Ngọc EXP trên đường thu về
+        for (final drop in drops) {
+          if ((drop.transform.position - hPos).distance <= 36) {
+            drop.transform.position = Offset.lerp(
+              drop.transform.position,
+              hPos,
+              0.42,
+            )!;
+          }
+        }
       }
       if (hook.isReturning &&
           (hook.transform.position - hook.origin).distance < 15) {
@@ -1119,6 +1258,69 @@ class GameEngine extends ChangeNotifier {
         block.elementAffinity?.applyWater(4.0);
       }
 
+      // === PHẢN ỨNG NGUYÊN TỐ DÂY CHUYỀN (Melt / Vaporize / Toxic Overload) ===
+      final affinity = block.elementAffinity!;
+      double reactionBonus = 0.0;
+      if (_reactionCooldown <= 0) {
+        if (equippedElements.contains(ElementType.fire) && affinity.isFrozen) {
+          // Tan Chảy (Melt): Lửa + Băng
+          reactionBonus = elementDamage * 0.55;
+          _reactionCooldown = 1.1;
+          shockwaves.add(
+            ShockwaveRing(
+              center: block.transform.position,
+              color: const Color(0xFFFFB74D),
+            ),
+          );
+          floatingTexts.add(
+            FloatingText(
+              text: '🔥❄️ TAN CHẢY!',
+              x: block.transform.x,
+              y: block.transform.y - 12,
+              color: const Color(0xFFFFD54F),
+            ),
+          );
+        } else if (equippedElements.contains(ElementType.water) &&
+            affinity.burnTimer > 0) {
+          // Bốc Hơi (Vaporize): Thủy + Hỏa
+          reactionBonus = elementDamage * 0.45;
+          _reactionCooldown = 1.1;
+          for (final neighbor in _blocksNear(
+            block.transform.position,
+            gridBlockSize * 1.45,
+          )) {
+            neighbor.elementAffinity?.applyWater(3.5);
+          }
+          floatingTexts.add(
+            FloatingText(
+              text: '💧🔥 BỐC HƠI!',
+              x: block.transform.x,
+              y: block.transform.y - 12,
+              color: const Color(0xFF80DEEA),
+            ),
+          );
+        } else if (equippedElements.contains(ElementType.lightning) &&
+            affinity.poisonTimer > 0) {
+          // Quá Tải Độc (Toxic Overload): Lôi + Độc
+          reactionBonus = elementDamage * 0.45;
+          _reactionCooldown = 1.1;
+          for (final neighbor in _blocksNear(
+            block.transform.position,
+            gridBlockSize * 1.5,
+          ).take(3)) {
+            neighbor.elementAffinity?.applyPoison(3.5, elementDamage * 0.22);
+          }
+          floatingTexts.add(
+            FloatingText(
+              text: '⚡☠️ QUÁ TẢI ĐỘC!',
+              x: block.transform.x,
+              y: block.transform.y - 12,
+              color: const Color(0xFFCCFF90),
+            ),
+          );
+        }
+      }
+
       // === ÁP DỤNG CÁC NGUYÊN TỐ CƠ BẢN (Đã cân bằng tỉ lệ & Cooldown) ===
       if (equippedElements.contains(ElementType.fire)) {
         block.elementAffinity?.applyFire(3.0, elementDamage * 0.25);
@@ -1149,8 +1351,10 @@ class GameEngine extends ChangeNotifier {
       if (equippedElements.contains(ElementType.voidDark)) {
         block.elementAffinity?.applyVoid(3.0);
       }
+      if (reactionBonus > 0) {
+        dmg += reactionBonus;
+      }
       if (_impactCooldown <= 0) {
-        final affinity = block.elementAffinity!;
         final type = affinity.isFrozen
             ? ElementType.frost
             : affinity.burnTimer > 0
@@ -1185,7 +1389,119 @@ class GameEngine extends ChangeNotifier {
     final justDestroyed = block.takeDamage(dmg);
 
     if (justDestroyed) {
+      _registerCombatKill(block);
       _onBlockDestroyed(block);
+    }
+  }
+
+  void _registerCombatKill(PixelBlock block) {
+    comboCount++;
+    comboTimer = 2.6;
+    if (dashActiveTimer > 0) {
+      dashCooldown = max(0, dashCooldown - 0.35);
+    }
+    if (!isOverdriveActive) {
+      feverProgress = (feverProgress + 0.032).clamp(0.0, 1.0);
+      if (feverProgress >= 1.0) {
+        _triggerOverdrive();
+      }
+    }
+    if (block.specialType != BlockSpecialType.none) {
+      _triggerSpecialBlockEffect(block);
+    }
+  }
+
+  void _triggerOverdrive() {
+    feverProgress = 0.0;
+    overdriveTimer = 5.0;
+    screenShake = max(screenShake, 2.0);
+    shockwaves.add(
+      ShockwaveRing(
+        center: player.transform.position,
+        color: Colors.amberAccent,
+      ),
+    );
+    floatingTexts.add(
+      FloatingText(
+        text: '⚡ CUỒNG NỘ QUÁ TẢI!',
+        x: player.transform.x,
+        y: player.transform.y - 24,
+        color: Colors.amberAccent,
+      ),
+    );
+    hudRevision.value++;
+  }
+
+  void _triggerSpecialBlockEffect(PixelBlock block) {
+    switch (block.specialType) {
+      case BlockSpecialType.explosiveCrystal:
+        screenShake = max(screenShake, 2.0);
+        shockwaves.add(
+          ShockwaveRing(
+            center: block.transform.position,
+            color: const Color(0xFFFF9F1C),
+          ),
+        );
+        floatingTexts.add(
+          FloatingText(
+            text: '💥 TINH THỂ NỔ!',
+            x: block.transform.x,
+            y: block.transform.y - 14,
+            color: const Color(0xFFFFB74D),
+          ),
+        );
+        for (final neighbor in _blocksNear(
+          block.transform.position,
+          gridBlockSize * 1.65,
+        )) {
+          if (neighbor != block && !neighbor.health!.isDestroyed) {
+            if (neighbor.takeDamage(totalDamage * 0.95)) {
+              _onBlockDestroyed(neighbor);
+            }
+          }
+        }
+      case BlockSpecialType.energyCore:
+        fusionCooldown = max(0, fusionCooldown - 2.5);
+        dashCooldown = 0;
+        addExp(20);
+        floatingTexts.add(
+          FloatingText(
+            text: '⚡ HỒI NĂNG LƯỢNG!',
+            x: block.transform.x,
+            y: block.transform.y - 14,
+            color: Colors.cyanAccent,
+          ),
+        );
+      case BlockSpecialType.magnetBeacon:
+        magnetSurgeTimer = 4.0;
+        floatingTexts.add(
+          FloatingText(
+            text: '🧲 TỪ TRƯỜNG TOÀN BẢN ĐỒ!',
+            x: block.transform.x,
+            y: block.transform.y - 14,
+            color: const Color(0xFFFDE047),
+          ),
+        );
+      case BlockSpecialType.overdriveRune:
+        if (isOverdriveActive) {
+          overdriveTimer = min(6.0, overdriveTimer + 2.0);
+        } else {
+          feverProgress = (feverProgress + 0.42).clamp(0.0, 1.0);
+          if (feverProgress >= 1.0) {
+            _triggerOverdrive();
+            return;
+          }
+        }
+        floatingTexts.add(
+          FloatingText(
+            text: '🔥 CỔ NGỮ CUỒNG NỘ!',
+            x: block.transform.x,
+            y: block.transform.y - 14,
+            color: const Color(0xFFF472B6),
+          ),
+        );
+      case BlockSpecialType.none:
+        break;
     }
   }
 
@@ -1610,10 +1926,10 @@ class GameEngine extends ChangeNotifier {
           y: block.transform.y,
           vx: cos(pAngle) * pSpeed,
           vy: sin(pAngle) * pSpeed,
-          size: rng.nextDouble() * 2 + 1.2,
+          size: rng.nextDouble() * 2.2 + 1.4,
           color: (i % 3 == 0) ? Colors.white : block.memeColor,
           rotSpeed: (rng.nextDouble() - 0.5) * 14.0,
-          isSparkle: false,
+          isSparkle: i == 0,
         ),
       );
     }
@@ -1669,7 +1985,9 @@ class GameEngine extends ChangeNotifier {
 
   void _updateDrops(double dt) {
     final pCenter = player.transform.position;
-    final mRange = magnetRange;
+    final mRange = magnetSurgeTimer > 0
+        ? 2500.0
+        : magnetRange + (harvestHasteTimer > 0 ? 38.0 : 0.0);
 
     for (int i = drops.length - 1; i >= 0; i--) {
       final drop = drops[i];
@@ -1680,7 +1998,7 @@ class GameEngine extends ChangeNotifier {
       if (dist <= mRange) {
         final dirX = (pCenter.dx - dPos.dx) / (dist > 0 ? dist : 1);
         final dirY = (pCenter.dy - dPos.dy) / (dist > 0 ? dist : 1);
-        final pullSpeed = 420.0;
+        final pullSpeed = magnetSurgeTimer > 0 ? 540.0 : 420.0;
         drop.transform.vx = dirX * pullSpeed;
         drop.transform.vy = dirY * pullSpeed;
       }
@@ -1707,6 +2025,22 @@ class GameEngine extends ChangeNotifier {
           gold += drop.value.toInt();
         } else {
           addExp(drop.value);
+        }
+        // Nội tại Nông Dân: Mùa Vàng Bội Thu mỗi 16 vật phẩm nhặt được
+        if (role.type == RoleType.farmer) {
+          _collectedDropsCounter++;
+          if (_collectedDropsCounter >= 16) {
+            _collectedDropsCounter = 0;
+            harvestHasteTimer = 3.0;
+            floatingTexts.add(
+              FloatingText(
+                text: '🌾 MÙA VÀNG!',
+                x: pCenter.dx,
+                y: pCenter.dy - 18,
+                color: Colors.amberAccent,
+              ),
+            );
+          }
         }
         if (_coinSoundCooldown <= 0) {
           AudioService.playCoinCollect();
@@ -1769,6 +2103,9 @@ class GameEngine extends ChangeNotifier {
     player.transform.vx = direction.dx * speed;
     player.transform.vy = direction.dy * speed;
     dashCooldown = 1.2;
+    isDashSmashReady = true;
+    dashActiveTimer = 0.55;
+    AudioService.playDash();
     impacts.add(
       ElementImpact(
         center: player.transform.position,
@@ -1781,6 +2118,29 @@ class GameEngine extends ChangeNotifier {
     return true;
   }
 
+  void _syncSpiritElements() {
+    if (spirits.isEmpty) return;
+    final activeList = equippedElements.toList();
+    final fallbackColors = [
+      Colors.cyanAccent,
+      Colors.amberAccent,
+      Colors.deepOrangeAccent,
+      Colors.purpleAccent,
+    ];
+    for (int i = 0; i < spirits.length; i++) {
+      if (activeList.isEmpty) {
+        spirits[i].element = ElementType.none;
+        spirits[i].color = fallbackColors[i % fallbackColors.length];
+      } else {
+        final el = activeList[i % activeList.length];
+        spirits[i].element = el;
+        spirits[i].color = ElementData.baseElements
+            .firstWhere((e) => e.type == el)
+            .color;
+      }
+    }
+  }
+
   // Thêm nguyên tố mới khi lên cấp
   void addElement(ElementType element) {
     if (!ElementData.baseElements.any((data) => data.type == element)) return;
@@ -1788,6 +2148,7 @@ class GameEngine extends ChangeNotifier {
     if (equippedElements.length < maxEquippedElements) {
       equippedElements.add(element);
     }
+    _syncSpiritElements();
     hudRevision.value++;
     notifyListeners();
   }
@@ -1798,6 +2159,7 @@ class GameEngine extends ChangeNotifier {
       if (equippedElements.length >= maxEquippedElements) return false;
       equippedElements.add(element);
     }
+    _syncSpiritElements();
     hudRevision.value++;
     notifyListeners();
     return true;
@@ -1826,6 +2188,7 @@ class GameEngine extends ChangeNotifier {
         color: orbColor,
       ),
     );
+    if (el == null) _syncSpiritElements();
     // Chia đều góc xoay quanh quả cầu
     for (int i = 0; i < spirits.length; i++) {
       spirits[i].angle = i * (2 * pi / spirits.length);
@@ -1857,6 +2220,7 @@ class GameEngine extends ChangeNotifier {
       ..clear()
       ..addAll(data.ingredients!);
     if (extra != null) equippedElements.add(extra);
+    _syncSpiritElements();
     selectedFusion = type;
     hudRevision.value++;
     notifyListeners();
@@ -1925,6 +2289,7 @@ class GameEngine extends ChangeNotifier {
         .where((block) => block.id == cast.targetId)
         .firstOrNull;
     if (origin == null) return;
+    AudioService.playFusion();
     switch (cast.type) {
       case ElementType.mist:
         mistZones.add(
@@ -2167,6 +2532,7 @@ class GameEngine extends ChangeNotifier {
     selectedFusion = activeFusions
         .where((e) => e.name == data['selected'])
         .firstOrNull;
+    _syncSpiritElements();
     final angle = atan2(player.transform.vy, player.transform.vx);
     player.transform.vx = cos(angle) * normalBallSpeed;
     player.transform.vy = sin(angle) * normalBallSpeed;

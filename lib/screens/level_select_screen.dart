@@ -70,10 +70,29 @@ class LevelSelectScreen extends StatelessWidget {
             return Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFF1D2C3D),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color.lerp(
+                      const Color(0xFF1D2C3D),
+                      level.theme.sky,
+                      locked ? 0.15 : 0.45,
+                    )!,
+                    Color.lerp(
+                      const Color(0xFF152231),
+                      level.theme.horizon,
+                      locked ? 0.05 : 0.28,
+                    )!,
+                  ],
+                ),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: completed ? const Color(0xFF497F70) : Colors.white10,
+                  color: completed
+                      ? const Color(0xFF66C7A8).withValues(alpha: 0.65)
+                      : locked
+                      ? Colors.white10
+                      : level.theme.accent.withValues(alpha: 0.32),
                 ),
               ),
               child: Column(

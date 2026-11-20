@@ -241,31 +241,68 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
       padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: _selectedRole.themeColor.withValues(alpha: 0.4),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.lerp(
+              const Color(0xFF1E293B),
+              _selectedRole.themeColor,
+              0.14,
+            )!,
+            Color.lerp(
+              const Color(0xFF131D2E),
+              _selectedRace.themeColor,
+              0.12,
+            )!,
+          ],
         ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: _selectedRole.themeColor.withValues(alpha: 0.52),
+          width: 1.4,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _selectedRole.themeColor.withValues(alpha: 0.16),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          // Quả cầu đại diện
+          // Quả cầu đại diện 3D + hào quang chủng tộc
           Container(
-            width: 68,
-            height: 68,
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
+              border: Border.all(
+                color: _selectedRace.themeColor.withValues(alpha: 0.8),
+                width: 2.2,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: _selectedRole.themeColor.withValues(alpha: 0.4),
-                  blurRadius: 16,
+                  color: _selectedRole.themeColor.withValues(alpha: 0.45),
+                  blurRadius: 18,
                   spreadRadius: 2,
+                ),
+                BoxShadow(
+                  color: _selectedRace.themeColor.withValues(alpha: 0.3),
+                  blurRadius: 26,
+                  spreadRadius: 1,
                 ),
               ],
               gradient: RadialGradient(
-                center: const Alignment(-0.3, -0.3),
-                radius: 0.8,
-                colors: [Colors.white, _selectedRole.themeColor, Colors.black],
+                center: const Alignment(-0.35, -0.38),
+                radius: 0.85,
+                colors: [
+                  Colors.white,
+                  _selectedRole.themeColor,
+                  Color.lerp(_selectedRole.themeColor, Colors.black, 0.72)!,
+                ],
+                stops: const [0.0, 0.48, 1.0],
               ),
             ),
             child: Center(

@@ -56,4 +56,21 @@ class AudioService {
       playPlatformSound('lightning');
     } catch (_) {}
   }
+
+  /// Phát âm thanh khi lướt tăng tốc (Dash)
+  static void playDash() {
+    if (!soundEnabled) return;
+    try {
+      playPlatformSound('dash');
+    } catch (_) {}
+  }
+
+  /// Phát âm thanh khi giải phóng kỹ năng Dung Hợp
+  static void playFusion() {
+    if (!soundEnabled) return;
+    try {
+      playPlatformSound('fusion');
+      HapticFeedback.heavyImpact();
+    } catch (_) {}
+  }
 }

@@ -22,14 +22,18 @@ class VictoryModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async => false,
+    return PopScope(
+      canPop: false,
       child: Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF1F2D42), Color(0xFF131D2D)],
+            ),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: isFinalStoryLevel ? Colors.cyanAccent : Colors.amberAccent,
@@ -39,8 +43,8 @@ class VictoryModal extends StatelessWidget {
               BoxShadow(
                 color:
                     (isFinalStoryLevel ? Colors.cyanAccent : Colors.amberAccent)
-                        .withOpacity(0.35),
-                blurRadius: 30,
+                        .withValues(alpha: 0.38),
+                blurRadius: 32,
                 spreadRadius: 6,
               ),
             ],
@@ -117,7 +121,7 @@ class VictoryModal extends StatelessWidget {
                             (isFinalStoryLevel
                                     ? Colors.cyanAccent
                                     : Colors.amberAccent)
-                                .withOpacity(0.4),
+                                .withValues(alpha: 0.4),
                         blurRadius: 18,
                         spreadRadius: 2,
                       ),
@@ -157,7 +161,7 @@ class VictoryModal extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.cyan.withOpacity(0.15),
+                      color: Colors.cyan.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: Colors.cyanAccent),
                     ),
